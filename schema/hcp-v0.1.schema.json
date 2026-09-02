@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/michaljach/hcp/schema/hcp-v0.1.schema.json",
+  "title": "HCP v0.1 — Harness Control Protocol",
+  "description": "Schema for the load-bearing HCP message types. Not exhaustive: v0.1 schemas the envelope, negotiation, attach, events, and the permission exchange. Optional fs/* and terminal/* families are specified in prose only.",
+  "$defs": {
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+    "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "seq": { "type": "integer", "minimum": 1 },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "deviceId": { "type": "string", "minLength": 1 },
+
+    "envelope": {
+      "type": "object",
+      "required": ["jsonrpc", "hcp"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "hcp": { "$ref": "#/$defs/version" }
+      }
+    },
+
+    "request": {
+      "allOf": [{ "$ref": "#/$defs/envelope" }],
+      "type": "object",
+      "required": ["jsonrpc", "hcp", "id", "method"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "hcp": { "$ref": "#/$defs/version" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "type": "string" },
+        "params": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+
+    "notification": {
+      "type": "object",
+      "required": ["jsonrpc", "hcp", "method"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "hcp": { "$ref": "#/$defs/version" },
+        "method": { "type": "string" },
+        "params": { "type": "object" }
+      },
+      "additionalProperties": false,
+      "not": { "required": ["id"] }
+    },
+
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "enum": [-32700, -32600, -32601, -32602, -32603,
+                   -32001, -32002, -32003, -32004, -32005, -32006, -32007, -32008]
+        },
+        "message": { "type": "string" },
+        "data": {
+          "type": "object",
+          "properties": { "retry_after_ms": { "type": "integer", "minimum": 0 } }
+        }
+      }
+    },
+
+    "riskLevel": { "enum": ["low", "medium", "high"] },
+    "formFactor": { "enum": ["phone", "tablet", "desktop", "headless"] },
+    "sessionState": {
+      "enum": ["starting", "idle", "working", "awaiting_input", "suspended", "ended"]
+    },
+    "permissionKind": { "enum": ["exec", "write", "tool", "network", "elicit"] },
+    "permissionScope": { "enum": ["once", "session", "always"] },
+
+    "initializeParams": {
+      "type": "object",
+      "required": ["protocol_versions", "client"],
+      "properties": {
+        "protocol_versions": {
+          "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/version" }
+        },
+        "client": {
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" },
+            "form_factor": { "$ref": "#/$defs/formFactor" }
+          }
+        },
+        "device_id": { "$ref": "#/$defs/deviceId" },
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "permission_kinds": {
+              "type": "array", "items": { "$ref": "#/$defs/permissionKind" }
+            },
+            "render": {
+              "type": "object",
+              "properties": {
+                "diff": { "type": "boolean" }, "markdown": { "type": "boolean" },
+                "terminal": { "type": "boolean" }, "images": { "type": "boolean" }
+              }
+            },
+            "push": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "initializeResult": {
+      "type": "object",
+      "required": ["protocol_version", "host", "harness", "capabilities"],
+      "properties": {
+        "protocol_version": { "$ref": "#/$defs/version" },
+        "host": {
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string" }, "version": { "type": "string" },
+            "platform": { "type": "string" }
+          }
+        },
+        "harness": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" }, "version": { "type": "string" },
+            "adapter": { "type": "string" }
+          }
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "Absent means unsupported. There is no tri-state.",
+          "properties": {
+            "steer": { "type": "boolean" }, "interrupt": { "type": "boolean" },
+            "fork": { "type": "boolean" }, "rollback": { "type": "boolean" },
+            "replay": { "type": "boolean" }, "lease": { "type": "boolean" },
+            "snapshot": { "type": "boolean" }, "diff": { "type": "boolean" },
+            "terminal": { "type": "boolean" }, "push": { "type": "boolean" },
+            "permission_kinds": {
+              "type": "array", "items": { "$ref": "#/$defs/permissionKind" }
+            },
+            "permission_scopes": {
+              "type": "array", "items": { "$ref": "#/$defs/permissionScope" }
+            },
+            "fs": {
+              "type": "object",
+              "properties": {
+                "read": { "type": "boolean" }, "write": { "type": "boolean" },
+                "watch": { "type": "boolean" }
+              }
+            },
+            "spawn": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+
+    "attachParams": {
+      "type": "object",
+      "required": ["session_id"],
+      "properties": {
+        "session_id": { "$ref": "#/$defs/sessionId" },
+        "from_seq": { "type": "integer", "minimum": 0 },
+        "stream": {
+          "type": "object",
+          "properties": {
+            "deltas": { "type": "boolean" },
+            "max_delta_hz": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      }
+    },
+
+    "attachResult": {
+      "type": "object",
+      "required": ["session_id", "state", "seq", "oldest_seq", "subscription_id"],
+      "properties": {
+        "session_id": { "$ref": "#/$defs/sessionId" },
+        "state": { "$ref": "#/$defs/sessionState" },
+        "seq": { "$ref": "#/$defs/seq" },
+        "oldest_seq": { "$ref": "#/$defs/seq" },
+        "subscription_id": { "type": "string" },
+        "replaying": { "type": "boolean" },
+        "pending_permissions": {
+          "type": "array", "items": { "$ref": "#/$defs/requestId" }
+        }
+      }
+    },
+
+    "sessionUpdateParams": {
+      "type": "object",
+      "required": ["session_id", "seq", "update"],
+      "properties": {
+        "session_id": { "$ref": "#/$defs/sessionId" },
+        "seq": { "$ref": "#/$defs/seq" },
+        "replayed": { "type": "boolean", "default": false },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "client_id": { "type": "string" },
+            "device_id": { "$ref": "#/$defs/deviceId" }
+          }
+        },
+        "update": {
+          "type": "object",
+          "required": ["kind"],
+          "description": "Unknown kinds MUST be ignored and MUST still advance the cursor.",
+          "properties": { "kind": { "type": "string" } }
+        }
+      }
+    },
+
+    "permissionAction": {
+      "type": "object",
+      "required": ["kind", "summary", "risk"],
+      "properties": {
+        "kind": { "type": "string" },
+        "summary": {
+          "type": "string", "minLength": 1, "maxLength": 120,
+          "description": "One line, imperative, no markup. A client MUST be able to render a correct prompt from summary + risk + options alone."
+        },
+        "risk": { "$ref": "#/$defs/riskLevel" },
+        "reversible": { "type": "boolean" },
+        "detail": { "type": "object" }
+      }
+    },
+
+    "permissionOption": {
+      "type": "object",
+      "required": ["id", "label", "kind", "scope"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["allow", "reject"] },
+        "scope": { "$ref": "#/$defs/permissionScope" },
+        "accepts_text": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
+    },
+
+    "requestPermissionParams": {
+      "type": "object",
+      "required": ["session_id", "seq", "action", "options", "expires_at"],
+      "properties": {
+        "session_id": { "$ref": "#/$defs/sessionId" },
+        "seq": { "$ref": "#/$defs/seq" },
+        "action": { "$ref": "#/$defs/permissionAction" },
+        "options": {
+          "type": "array", "minItems": 1,
+          "items": { "$ref": "#/$defs/permissionOption" }
+        },
+        "expires_at": {
+          "type": "string", "format": "date-time",
+          "description": "REQUIRED. On expiry the Host behaves as if the most restrictive reject option was chosen."
+        }
+      }
+    },
+
+    "requestPermissionResult": {
+      "type": "object",
+      "required": ["option_id"],
+      "properties": {
+        "option_id": { "type": "string", "minLength": 1 },
+        "text": {
+          "type": "string",
+          "description": "Only valid when the chosen option has accepts_text: true."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "permissionResolvedParams": {
+      "type": "object",
+      "required": ["session_id", "request_id", "seq", "option_id"],
+      "properties": {
+        "session_id": { "$ref": "#/$defs/sessionId" },
+        "request_id": { "$ref": "#/$defs/requestId" },
+        "seq": { "$ref": "#/$defs/seq" },
+        "option_id": {
+          "type": ["string", "null"],
+          "description": "null when the request expired without an answer."
+        },
+        "resolved_by": {
+          "type": ["object", "null"],
+          "properties": {
+            "client_id": { "type": "string" },
+            "device_id": { "$ref": "#/$defs/deviceId" }
+          }
+        }
+      }
+    }
+  },
+
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/notification" }
+  ]
+}

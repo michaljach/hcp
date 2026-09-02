@@ -1,13 +1,13 @@
-# HTP Prior Art & Landscape
+# HCP Prior Art & Landscape
 
 Research date: 2026-09-02. Versions inspected locally: Claude Code 2.1.258, codex-cli 0.150.1.
 
-## 1. Does something like HTP already exist?
+## 1. Does something like HCP already exist?
 
 Short answer: the pieces exist, the thing you're describing does not. Five relevant
 layers, none of which covers "remote client attaches to a running harness session."
 
-| Standard | Axis it covers | Transport | Gap vs HTP |
+| Standard | Axis it covers | Transport | Gap vs HCP |
 |---|---|---|---|
 | **MCP** | agent → tools | JSON-RPC (stdio/HTTP) | Wrong axis. Feeds an agent; doesn't control one. |
 | **ACP** (Agent Client Protocol) | editor ↔ agent | JSON-RPC 2.0 over stdio (NDJSON) | Closest semantics. **Assumes a local subprocess.** Remote transport is roadmap, not shipped. |
@@ -37,7 +37,7 @@ inside both Zed and JetBrains in Jan 2026, and ACP was the headline feature of Z
 
 **The gap:** remote transports — letting a client connect to an agent on another
 machine — were still unshipped as of mid-2026. ACP has the vocabulary but not the
-network model. That is precisely HTP's opening.
+network model. That is precisely HCP's opening.
 
 ### UHP — Unified Harness Protocol (HarnessRouter / Epsilla)
 
@@ -68,7 +68,7 @@ mobile control layer for Claude Code, Codex, Amp, and Droid. Its architecture: a
 WebSocket server on your Mac drives the agent **through tmux** — `tmux send-keys` to
 type, `tmux capture-pane` to read. Their own docs state there is no API between the
 server and Claude Code; it controls the agent the same way a human does. That is the
-strongest possible argument that HTP should exist.
+strongest possible argument that HCP should exist.
 
 Governance context: the Linux Foundation formed the **Agentic AI Foundation** (Dec
 2025) with MCP (Anthropic), goose (Block), and AGENTS.md (OpenAI) as founding
@@ -160,12 +160,12 @@ NDJSON both ways, one process kept alive with stdin open. Carries
 (e.g. `deny`) for tool approval, plus `mcp_message`/`mcp_response` for SDK MCP servers.
 Without `--permission-prompt-tool stdio`, tools auto-deny in non-interactive mode.
 
-**This is stdio-local and vendor-specific.** It is the natural HTP adapter point for
+**This is stdio-local and vendor-specific.** It is the natural HCP adapter point for
 Claude Code, and it works today without vendor cooperation.
 
 ## 3. How Codex does remote
 
-Codex's design is much closer to what HTP wants to be — and it is self-describing.
+Codex's design is much closer to what HCP wants to be — and it is self-describing.
 
 ### `codex app-server` — the actual protocol
 
@@ -212,7 +212,7 @@ Client requests, by family:
   `plugin/*`, `skills/*`, `marketplace/*`, `model/list`, `config/*`, `review/start`,
   `account/*`, `permissionProfile/list`, `externalAgentConfig/{detect,import}`
 
-Server→client requests — **the approval channel**, and the part any HTP design lives
+Server→client requests — **the approval channel**, and the part any HCP design lives
 or dies on:
 
 ```
@@ -256,7 +256,7 @@ codex --remote unix://PATH
 ```
 
 Same for `codex agents --remote ...`. There is no privileged local path — the local
-terminal and a remote phone are peers on the same protocol. If HTP borrows one thing
+terminal and a remote phone are peers on the same protocol. If HCP borrows one thing
 from Codex, borrow this.
 
 ### Product surface
@@ -268,13 +268,13 @@ devices without exposing them directly to the public internet." Remote dev envir
 use SSH to start and manage the remote Codex app server. Host support is macOS-only,
 Windows listed as coming.
 
-The docs carry an explicit warning worth quoting in the HTP threat model: **"Don't
+The docs carry an explicit warning worth quoting in the HCP threat model: **"Don't
 expose app-server transports directly on a shared or public network."**
 
 Adjacent: `codex mcp-server` (Codex as an MCP server — coarse-grained, one tool),
 `codex cloud` (Codex Cloud tasks: exec/status/list/apply/diff), `codex exec-server`.
 
-## 4. What this means for HTP
+## 4. What this means for HCP
 
 ### The convergent architecture
 
@@ -300,12 +300,12 @@ requirements list:
 | Auth | claude.ai full-scope login; no API keys; no gateways | Capability token or signed JWT; issuer/audience/skew configurable |
 | Enterprise | Rich: admin toggle, Trusted Devices, compliance gates | Lighter; SSH-oriented for remote hosts |
 
-### Where HTP has genuine room
+### Where HCP has genuine room
 
 - **A vendor-neutral relay / rendezvous spec.** Claude's relay is Anthropic-only;
   Codex's is OpenAI-only. The phone→laptop NAT-traversal problem is unsolved in the
   open, and it is the single hardest part to get right. This is the highest-value
-  piece of HTP.
+  piece of HCP.
 - **Session attach semantics.** ACP is stdio-local; UHP is task-shaped HTTP. Nobody
   specifies N remote clients attaching to one live session with consistent state.
 - **A common approval envelope.** Both harnesses have rich, mutually incompatible
@@ -315,49 +315,39 @@ requirements list:
 
 ### Design recommendation
 
-HTP ≈ **ACP's method vocabulary + Codex app-server's transport/auth model + a
+HCP ≈ **ACP's method vocabulary + Codex app-server's transport/auth model + a
 vendor-neutral relay and pairing spec.**
 
 Reusing ACP's names (`session/new`, `session/prompt`, `session/update`,
 `session/request_permission`, `fs/*`, `terminal/*`) means every existing ACP client and
-adapter bridges to HTP nearly for free, and it avoids relitigating a vocabulary that
+adapter bridges to HCP nearly for free, and it avoids relitigating a vocabulary that
 two IDE vendors already shipped. The novel contribution is the layer ACP explicitly
 has not built: transport, multi-client attach, relay, pairing, and reconnect.
 
 Ship-first conformance targets, both reachable today without vendor cooperation:
 
-- **Codex adapter** — `codex app-server --listen ws://` is already the shape HTP wants.
+- **Codex adapter** — `codex app-server --listen ws://` is already the shape HCP wants.
 - **Claude Code adapter** — `claude --output-format stream-json --input-format
-  stream-json --permission-prompt-tool stdio`, wrapped in the HTP transport.
+  stream-json --permission-prompt-tool stdio`, wrapped in the HCP transport.
 
 Prove the standard by making a single mobile client drive both without tmux.
 
 ## 5. On the name
 
-One keeper, two problems. **"Harness" is right** — it is the emerging term of art and
-it correctly distinguishes this from "agent," which ACP and A2A have already claimed.
+Originally **HTP — Harness Transport Protocol**. Renamed to **HCP — Harness Control
+Protocol** on 2026-09-02. The reasoning, kept because it constrains future naming:
 
-- **"Transport" names the wrong layer.** A transport moves bytes: TCP, WebSocket,
-  stdio. Codex already has three. What HTP specifies is what rides on top — session
-  attach, approval round-trips, pairing, reconnect. That is a control plane. The name
-  undersells it and makes the spec awkward to write ("HTP over the WebSocket
-  transport").
-- **"HTP" is one keystroke from HTTP.** A permanent tax on search, speech, and every
-  code review where `htp://` looks like a typo.
-- **The neighbourhood is occupied.** UHP (Unified Harness Protocol) already exists in
-  this exact space. HTP vs UHP is a collision waiting to happen.
+- **"Transport" named the wrong layer.** A transport moves bytes: TCP, WebSocket, stdio.
+  Codex already has three. What this spec describes is what rides on top — session attach,
+  approval round-trips, pairing, reconnect. That is a control plane.
+- **"HTP" was one keystroke from HTTP** — a permanent tax on search, speech, and every code
+  review where `htp://` looks like a typo.
+- **The neighbourhood was occupied.** UHP (Unified Harness Protocol) already sits in this
+  space; HTP vs UHP was a collision waiting to happen.
+- **"Control" is the vendors' own word** — `claude remote-control`, `codex remote-control`,
+  `remoteControl/status/changed` — so the name lands in vocabulary the audience has.
 
-**Recommendation: HCP — Harness Control Protocol.** Smallest change that fixes the
-layer error, and "control" is the word both vendors independently chose for this
-feature (`claude remote-control`, `codex remote-control`,
-`remoteControl/status/changed`). Check against HashiCorp Cloud Platform, same initials,
-different domain.
-
-**Runner-up: HSP — Harness Session Protocol**, if the session should be the noun rather
-than the act of controlling it. Cleaner acronym space.
-
-**Escape hatch: ASCP — Agent Session Control Protocol**, if harness.io's trademark
-becomes a real obstacle. Costs you the term of art.
-
-If you keep HTP regardless, redefine the T: *Harness Teleoperation Protocol* is
-accurate, distinctive, and describes exactly what a phone does to a laptop.
+"Harness" was kept: it is the emerging term of art and it distinguishes this from "agent,"
+which ACP and A2A have claimed. Residual risk to watch: harness.io is an established CI/CD
+company. If a trademark question ever blocks the name, the fallback on file is **ASCP —
+Agent Session Control Protocol**, at the cost of losing the term of art.
