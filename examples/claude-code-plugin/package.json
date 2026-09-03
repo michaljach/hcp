@@ -1,0 +1,14 @@
+{
+  "name": "hcp-claude-code-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code plugin that exposes the running session over HCP v0.1.",
+  "type": "module",
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "test": "node test/plugin.ts",
+    "status": "node src/cli.ts status",
+    "client": "node test/client.ts"
+  },
+  "license": "Apache-2.0"
+}

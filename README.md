@@ -90,7 +90,8 @@ Everything else is shared.
 | [`spec/v0.1/capabilities.md`](spec/v0.1/capabilities.md) | Negotiation and graceful degradation |
 | [`schema/hcp-v0.1.schema.json`](schema/hcp-v0.1.schema.json) | JSON Schema for the load-bearing message types |
 | [`docs/adapter-mapping.md`](docs/adapter-mapping.md) | Concrete mapping to Claude Code and Codex |
-| [`examples/claude-code-adapter/`](examples/claude-code-adapter) | Working reference Host for the Claude Code CLI |
+| [`examples/claude-code-adapter/`](examples/claude-code-adapter) | Reference Host that **drives** the Claude Code CLI |
+| [`examples/claude-code-plugin/`](examples/claude-code-plugin) | Claude Code **plugin** that exposes the session you are already in |
 
 ## Conformance targets
 
@@ -103,6 +104,10 @@ Both are reachable today without vendor cooperation, which is the point.
   [`examples/claude-code-adapter/`](examples/claude-code-adapter): a zero-dependency
   TypeScript Host with a scripted harness mode, so `npm test` runs the whole loop without
   tokens or a logged-in CLI.
+- **Claude Code, from inside** — [`examples/claude-code-plugin/`](examples/claude-code-plugin)
+  is a real Claude Code plugin whose `PreToolUse` hook *is* the HCP permission channel, so a
+  phone answers the prompts for the session you are already sitting in. Passes
+  `claude plugin validate`.
 
 The standard is proven when one mobile client drives both, and no tmux is involved.
 

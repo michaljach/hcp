@@ -1,0 +1,32 @@
+{
+  "description": "HCP bridge. SessionStart registers this session with the HCP daemon; PreToolUse is the permission channel that a remote client answers; the rest emit session events.",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"",
+            "statusMessage": "Waiting for remote approval…",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+    ]
+  }
+}
