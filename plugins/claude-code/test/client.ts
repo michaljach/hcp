@@ -15,7 +15,16 @@ const sock = connect(clientSocket());
 const send = (o: unknown) => sock.write(JSON.stringify(o) + "\n");
 let pending: string | null = null;
 
-sock.on("error", (e) => { console.error(`no daemon: ${e.message}`); process.exit(1); });
+sock.on("error", (e: any) => {
+  console.error(`Cannot reach the HCP server at ${clientSocket()}`);
+  console.error(e.code === "ENOENT"
+    ? "\nNothing is listening there. The server starts with the plugin's MCP server —\n" +
+      "check `/mcp` inside Claude Code for a server named `hcp`. If it is connected but\n" +
+      "this still fails, the running server predates this fix: disable and re-enable the\n" +
+      "plugin so it picks up the new socket path."
+    : `\n${e.message}`);
+  process.exit(1);
+});
 sock.on("connect", () => {
   send({ jsonrpc: "2.0", hcp: HCP_VERSION, id: "init", method: "initialize",
          params: { protocol_versions: [HCP_VERSION],

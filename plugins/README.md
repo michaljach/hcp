@@ -136,6 +136,12 @@ attached; or the action graded below `escalate_from`. Check in that order.
 is also what happens on every failure path. The plugin is built so it cannot wedge a local
 session; a silent fallback to normal behavior is the intended failure mode.
 
+**`/mcp` shows `hcp` connected but the client says ENOENT.** The running server predates
+the socket-path fix in 0.2.1. Disable and re-enable the plugin so it restarts on the new
+path. Server and client both derive the socket from `$TMPDIR/hcp-<uid>/hcp.sock` now —
+earlier builds used `CLAUDE_PLUGIN_DATA`, which is only set for processes Claude Code
+launches, so a client started from a shell could never find it.
+
 **Port 7517 is in use.** The hooks POST to a fixed port because `hooks.json` is static config
 and cannot read a runtime value. If something else owns it, the server retries the bind every
 30 seconds and takes over when the port frees. To move it you must set `HCP_HOOK_PORT` *and*

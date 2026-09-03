@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { createInterface } from "node:readline";
-import { mkdtempSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,8 +29,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // The server is launched exactly as .mcp.json launches it: a stdio subprocess.
 const srv = spawn(process.execPath, [join(ROOT, "src", "server.ts")], {
-  env: { ...process.env, CLAUDE_PLUGIN_OPTION_SOCKET_DIR: SOCKET_DIR,
-         HCP_HOOK_PORT: String(PORT) },
+  env: { ...process.env, HCP_SOCKET_DIR: SOCKET_DIR, HCP_HOOK_PORT: String(PORT) },
   stdio: ["pipe", "pipe", "pipe"],
 });
 const mcpInbox: any[] = [];
@@ -160,5 +159,6 @@ for (const f of ["classify.ts", "types.ts"]) {
 }
 
 sock.destroy(); srv.kill();
+rmSync(SOCKET_DIR, { recursive: true, force: true });
 console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
 process.exit(failures === 0 ? 0 : 1);

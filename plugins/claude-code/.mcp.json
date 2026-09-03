@@ -2,10 +2,7 @@
   "mcpServers": {
     "hcp": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/src/server.ts"],
-      "env": {
-        "CLAUDE_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
-      }
+      "args": ["${CLAUDE_PLUGIN_ROOT}/src/server.ts"]
     }
   }
 }
