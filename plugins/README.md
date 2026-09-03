@@ -100,6 +100,18 @@ reject_feedback Use staging, not dev
 Claude receives the denial *with the reason*, which is the difference between blocking an
 agent and redirecting one.
 
+### 5. Send a prompt back
+
+Type anything that is not an option id and it is queued as a prompt:
+
+```
+also add an index on users.email
+  queued (1 pending) — delivered when the current turn ends
+```
+
+It lands the moment Claude finishes its current turn. If the session is idle nothing is
+coming to interrupt, so it waits for the end of the next turn you start locally.
+
 ---
 
 ## How it decides what to escalate
@@ -160,10 +172,11 @@ attached to answer.
   transports, pairing, and the Noise channel are specified in [`spec/v0.1/`](../spec/v0.1)
   but not implemented, so there is no safe way to reach this from a real phone over a
   network yet.
-- **It cannot originate turns.** A hook can observe and it can decide, but it cannot inject
-  a new turn into a running CLI, so `session/prompt` and `session/steer` return `-32005`.
-  The [`claude-code-adapter`](../examples/claude-code-adapter) exists for that case: it
-  drives the CLI from outside and can start turns.
+- **Prompts land at turn end, not immediately.** `session/prompt` queues your text and
+  delivers it by blocking the next `Stop` event. That steers work already in flight, but it
+  **cannot wake an idle session** — with no turn running, no `Stop` is coming. For prompts
+  that start turns, use [`claude-code-adapter`](../examples/claude-code-adapter), which
+  drives the CLI from outside.
 - **Draft protocol.** HCP v0.1 is a draft and will change.
 
 ## Writing another one

@@ -4,6 +4,9 @@
  * a phone.
  *
  *   node test/client.ts
+ *
+ * Type an option id to answer a permission. Type anything else to queue a prompt,
+ * which lands when the session's current turn ends.
  */
 
 import { connect } from "node:net";
@@ -75,6 +78,12 @@ createInterface({ input: sock }).on("line", (l) => {
     return;
   }
 
+  if (String(m.id).startsWith("say_")) {
+    if (m.error) console.log(`  could not queue: ${m.error.message}`);
+    else console.log(`  queued (${m.result.queued} pending) — ${m.result.note}`);
+    return;
+  }
+
   if (m.method === "session/permission_resolved") {
     console.log(`  resolved: ${m.params.option_id ?? "expired"} ` +
                 `by ${m.params.resolved_by?.device_id ?? "nobody"}\n`);
@@ -82,9 +91,20 @@ createInterface({ input: sock }).on("line", (l) => {
   }
 });
 
+let sends = 0;
 createInterface({ input: process.stdin }).on("line", (line) => {
-  if (!pending) return;
-  const [option_id, ...rest] = line.trim().split(/\s+/);
-  send({ jsonrpc: "2.0", hcp: HCP_VERSION, id: pending,
-         result: { option_id, text: rest.join(" ") || undefined } });
+  const text = line.trim();
+  if (!text) return;
+
+  if (pending) {
+    const [option_id, ...rest] = text.split(/\s+/);
+    send({ jsonrpc: "2.0", hcp: HCP_VERSION, id: pending,
+           result: { option_id, text: rest.join(" ") || undefined } });
+    return;
+  }
+
+  const sid = [...attached][0];
+  if (!sid) { console.log("  no session attached yet"); return; }
+  send({ jsonrpc: "2.0", hcp: HCP_VERSION, id: `say_${++sends}`,
+         method: "session/prompt", params: { session_id: sid, text } });
 });

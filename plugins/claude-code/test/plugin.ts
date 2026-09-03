@@ -100,11 +100,6 @@ send({ jsonrpc: "2.0", hcp: "0.1", id: "i", method: "initialize",
                  device_id: "dev_test_phone" } });
 check("HCP initialize succeeds", (await waitFor((m) => m.id === "i")).result?.protocol_version === "0.1");
 
-send({ jsonrpc: "2.0", hcp: "0.1", id: "p", method: "session/prompt",
-       params: { session_id: SESSION, text: "hi" } });
-check("session/prompt is -32005 (a hook cannot inject a turn)",
-      (await waitFor((m) => m.id === "p")).error?.code === -32005);
-
 send({ jsonrpc: "2.0", hcp: "0.1", id: "l", method: "host/sessions/list" });
 check("the Claude Code session is registered",
       (await waitFor((m) => m.id === "l")).result?.sessions?.[0]?.session_id === SESSION);
@@ -152,7 +147,50 @@ const announced = await waitFor((m) => m.method === "host/status" &&
 check("a later session is announced over host/status",
       !!announced, JSON.stringify(announced?.params));
 
-// 7 — seq, and the status tool reflecting live state
+// 7 — the queued prompt path: client -> Claude, delivered at turn end
+send({ jsonrpc: "2.0", hcp: "0.1", id: "q1", method: "session/prompt",
+       params: { session_id: SESSION, text: "use the staging database" } });
+const q1 = await waitFor((m) => m.id === "q1");
+check("session/prompt is accepted and queued", q1.result?.queued === 1, JSON.stringify(q1.error));
+check("the reply says when it will land", q1.result?.delivery === "on_turn_end");
+check("clients see the queued prompt",
+      await waitFor((m) => m.method === "session/update" &&
+                           m.params?.update?.queued === true).then(() => true));
+
+send({ jsonrpc: "2.0", hcp: "0.1", id: "q2", method: "session/prompt",
+       params: { session_id: SESSION, text: "then run the tests" } });
+check("a second prompt queues behind the first",
+      (await waitFor((m) => m.id === "q2")).result?.queued === 2);
+
+const stop1 = await postHook({ hook_event_name: "Stop", stop_hook_active: false });
+check("Stop blocks and carries the first prompt",
+      stop1.hookSpecificOutput?.decision === "block" &&
+      stop1.hookSpecificOutput?.continueWithInstructions === "use the staging database",
+      JSON.stringify(stop1));
+check("the block names the remaining queue depth",
+      /1 more/.test(stop1.hookSpecificOutput?.reason ?? ""), stop1.hookSpecificOutput?.reason);
+
+const stop2 = await postHook({ hook_event_name: "Stop", stop_hook_active: true });
+check("the next Stop delivers the second prompt in order",
+      stop2.hookSpecificOutput?.continueWithInstructions === "then run the tests");
+
+const stop3 = await postHook({ hook_event_name: "Stop", stop_hook_active: true });
+check("an empty queue lets the session stop — the drain terminates",
+      Object.keys(stop3).length === 0, JSON.stringify(stop3));
+
+const bad = await new Promise<any>((r) => {
+  send({ jsonrpc: "2.0", hcp: "0.1", id: "q3", method: "session/prompt",
+         params: { session_id: SESSION, text: "   " } });
+  waitFor((m) => m.id === "q3").then(r);
+});
+check("an empty prompt is rejected", bad.error?.code === -32602);
+
+send({ jsonrpc: "2.0", hcp: "0.1", id: "st", method: "session/steer",
+       params: { session_id: SESSION, text: "x" } });
+check("session/steer is still -32005 — it is genuinely mid-turn",
+      (await waitFor((m) => m.id === "st")).error?.code === -32005);
+
+// 8 — seq, and the status tool reflecting live state
 const seqs = inbox.filter((m) => m.method === "session/update").map((m) => m.params.seq);
 check("seq is gapless", seqs.every((n, i) => i === 0 || n === seqs[i - 1] + 1), seqs.join(","));
 
@@ -160,7 +198,7 @@ const st = await mcp(3, "tools/call", { name: "hcp_status", arguments: {} });
 const text = st.result?.content?.[0]?.text ?? "";
 check("hcp_status reports the attached client", /1 client\(s\) attached/.test(text), text.split("\n")[0]);
 
-// 8 — shared modules must not drift from the adapter's copies
+// 9 — shared modules must not drift from the adapter's copies
 for (const f of ["classify.ts", "types.ts"]) {
   const a = readFileSync(join(ROOT, "..", "..", "examples", "claude-code-adapter", "src", f), "utf8");
   check(`src/${f} is identical to the adapter's copy`,

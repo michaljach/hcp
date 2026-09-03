@@ -144,5 +144,12 @@ fires a `PermissionRequest` event, which would be a better fit — it fires when
 would actually be shown, rather than on every tool call — but its payload contract is not
 documented, so adopting it would be guesswork.
 
+The `Stop`-blocking contract is documented for *command* hooks in terms of exit code 2,
+while this plugin uses HTTP hooks, where the stated equivalent is a non-2xx response. The
+server returns `200` with `decision: "block"` in the body, which is what "response body
+parsed as JSON per the JSON output rules" should mean. The tests verify the server emits
+the right body; whether Claude Code honors it on a 2xx is the part only a live session can
+confirm. If queued prompts are silently dropped, that is the first thing to change.
+
 Port 7517 is hardcoded in `hooks.json`. Set `HCP_HOOK_PORT` to move the server, but you
 must edit `hooks.json` to match; static config cannot read a runtime value.

@@ -60,7 +60,9 @@ interface Pending { settle(d: { allow: boolean; reason?: string } | null): void;
                     timer: NodeJS.Timeout; done: boolean; }
 interface Session { id: string; cwd: string; name: string; state: SessionState;
                     seq: number; oldestSeq: number; log: SessionEvent[];
-                    pending: Map<string, Pending>; }
+                    pending: Map<string, Pending>;
+                    /** Prompts from clients, delivered one per turn end. See onStop. */
+                    queue: string[]; }
 
 const sessions = new Map<string, Session>();
 const clients = new Set<Client>();
@@ -69,7 +71,7 @@ function session(id: string, cwd = process.cwd()): Session {
   let s = sessions.get(id);
   if (!s) {
     s = { id, cwd, name: cwd.split("/").pop() ?? "session", state: "idle",
-          seq: 0, oldestSeq: 1, log: [], pending: new Map() };
+          seq: 0, oldestSeq: 1, log: [], pending: new Map(), queue: [] };
     sessions.set(id, s);
     // Clients attach to a session list they fetched once. Without this, a client
     // that connected before any session existed would sit silent forever.
@@ -88,6 +90,7 @@ function announce() {
 const summarize = (s: Session) => ({
   session_id: s.id, name: s.name, cwd: s.cwd, state: s.state,
   seq: s.seq, oldest_seq: s.oldestSeq, pending_permissions: [...s.pending.keys()],
+  queued_prompts: s.queue.length,
 });
 
 function emit(s: Session, update: Record<string, unknown>): number {
@@ -127,11 +130,36 @@ async function onHook(m: any): Promise<unknown> {
     case "PostToolUse":
       emit(s, { kind: "tool_result", tool: m.tool_name, output: m.tool_response ?? null });
       return {};
-    case "Stop": setState(s, "idle"); return {};
+    case "Stop": return onStop(s, m);
     case "SessionEnd": setState(s, "ended"); sessions.delete(s.id); announce(); return {};
     case "PreToolUse": return await onPreToolUse(s, m);
     default: return {};
   }
+}
+
+/**
+ * Turn end is the only moment a hook can put words into a running session: blocking
+ * the Stop event makes Claude continue with `continueWithInstructions`.
+ *
+ * One prompt per Stop. Claude continues, finishes, Stop fires again, and the next one
+ * goes — so a queue drains in order and terminates on its own. That self-limiting
+ * drain is why `stop_hook_active` needs no special handling here: we only ever block
+ * while there is queued user intent to deliver, and each block consumes one item.
+ */
+function onStop(s: Session, _m: any): unknown {
+  const text = s.queue.shift();
+  if (!text) { setState(s, "idle"); return {}; }
+
+  emit(s, { kind: "user_message", text, delivered: true });
+  setState(s, "working");
+  return {
+    hookSpecificOutput: {
+      hookEventName: "Stop",
+      decision: "block",
+      reason: `Queued from a connected HCP client${s.queue.length ? ` (${s.queue.length} more)` : ""}`,
+      continueWithInstructions: text,
+    },
+  };
 }
 
 async function onPreToolUse(s: Session, m: any): Promise<unknown> {
@@ -201,6 +229,9 @@ async function onClient(method: string, params: any, c: Client): Promise<unknown
         capabilities: {
           steer: false, interrupt: false, replay: true, snapshot: true, lease: false,
           fork: false, rollback: false, diff: false, terminal: false, push: false,
+          // Prompts are accepted but land at turn end, never immediately. A client
+          // should say so rather than implying a chat box.
+          prompt: true, prompt_delivery: "on_turn_end",
           permission_kinds: ["exec", "write", "tool", "network"],
           permission_scopes: ["once"],
           fs: { read: false, write: false, watch: false },
@@ -230,10 +261,23 @@ async function onClient(method: string, params: any, c: Client): Promise<unknown
       return { session_id: s!.id, state: s!.state, seq: s!.seq, oldest_seq: s!.oldestSeq,
                events: s!.log, pending_permissions: [...s!.pending.keys()] };
     }
-    case "session/prompt":
+    case "session/prompt": {
+      const s = sessions.get(String(params?.session_id));
+      if (!s) fail(ERR.sessionNotFound, "no such session");
+      const text = String(params?.text ?? "").trim();
+      if (!text) fail(ERR.invalidParams, "text is required");
+      s!.queue.push(text);
+      emit(s!, { kind: "user_message", text, queued: true },
+           { client_id: c.id, device_id: c.deviceId });
+      return { ok: true, queued: s!.queue.length, delivery: "on_turn_end",
+               note: s!.state === "working"
+                 ? "delivered when the current turn ends"
+                 : "session is idle; delivered at the end of its next turn" };
+    }
     case "session/steer":
+      // Genuinely different: steer is mid-turn, and a hook cannot reach into one.
       return fail(ERR.capabilityUnsupported,
-                  "the plugin observes and approves; it cannot originate turns");
+                  "no mid-turn steer; session/prompt queues for the end of the turn");
     default:
       return fail(ERR.methodNotFound, `unknown method: ${method}`);
   }
@@ -324,6 +368,8 @@ function status(): string {
   for (const s of sessions.values()) {
     lines.push(`  ${s.id}  ${s.state.padEnd(15)} seq ${s.seq}  ${s.name}`);
     for (const p of s.pending.keys()) lines.push(`      awaiting a decision: ${p}`);
+    if (s.queue.length)
+      lines.push(`      ${s.queue.length} queued prompt(s), delivered at turn end`);
   }
   if (!clients.size)
     lines.push("No client attached, so tool calls fall through to the normal local prompt.");
