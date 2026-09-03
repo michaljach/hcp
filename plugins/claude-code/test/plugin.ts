@@ -138,7 +138,7 @@ check("seq is gapless", seqs.every((n, i) => i === 0 || n === seqs[i - 1] + 1), 
 
 // 7 — the shared modules must not drift from the adapter's copies
 for (const f of ["classify.ts", "types.ts"]) {
-  const a = readFileSync(join(ROOT, "..", "claude-code-adapter", "src", f), "utf8");
+  const a = readFileSync(join(ROOT, "..", "..", "examples", "claude-code-adapter", "src", f), "utf8");
   const b = readFileSync(join(ROOT, "src", f), "utf8");
   check(`src/${f} is identical to the adapter's copy`, a === b);
 }

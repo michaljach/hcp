@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "hcp",
+  "description": "Plugins that expose a running coding-agent session over HCP, the Harness Control Protocol, so a phone or browser can watch it and answer its permission prompts.",
+  "owner": {
+    "name": "Michal Jach",
+    "url": "https://github.com/michaljach"
+  },
+  "plugins": [
+    {
+      "name": "hcp",
+      "description": "Exposes this Claude Code session over HCP v0.1. Its PreToolUse hook is the permission channel, so a connected client answers the prompts for the session you are already sitting in.",
+      "author": { "name": "Michal Jach" },
+      "category": "productivity",
+      "keywords": ["hcp", "remote", "protocol", "permissions", "mobile"],
+      "source": "./plugins/claude-code",
+      "homepage": "https://github.com/michaljach/hcp/tree/main/plugins/claude-code",
+      "license": "Apache-2.0"
+    }
+  ]
+}

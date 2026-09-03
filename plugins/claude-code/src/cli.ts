@@ -51,7 +51,7 @@ createInterface({ input: sock }).on("line", (l) => {
                 `  ${s.name}${flag}`);
     for (const p of s.pending_permissions ?? []) console.log(`      pending: ${p}`);
   }
-  console.log("\nAttach a client:  node examples/claude-code-plugin/test/client.ts\n");
+  console.log("\nAttach a client:  node plugins/claude-code/test/client.ts\n");
   sock.destroy();
   process.exit(0);
 });

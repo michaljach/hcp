@@ -92,7 +92,7 @@ Everything else is shared.
 | [`docs/adapter-mapping.md`](docs/adapter-mapping.md) | Concrete mapping to Claude Code and Codex |
 | [`examples/claude-code-adapter/`](examples/claude-code-adapter) | Reference Host that **drives** the Claude Code CLI |
 | [`examples/codex-adapter/`](examples/codex-adapter) | Reference Host for the **Codex app-server** |
-| [`examples/claude-code-plugin/`](examples/claude-code-plugin) | Claude Code **plugin** that exposes the session you are already in |
+| [`plugins/claude-code/`](plugins/claude-code) | Claude Code **plugin** that exposes the session you are already in |
 
 ## Conformance targets
 
@@ -108,10 +108,18 @@ Both are reachable today without vendor cooperation, which is the point.
   [`examples/claude-code-adapter/`](examples/claude-code-adapter): a zero-dependency
   TypeScript Host with a scripted harness mode, so `npm test` runs the whole loop without
   tokens or a logged-in CLI.
-- **Claude Code, from inside** — [`examples/claude-code-plugin/`](examples/claude-code-plugin)
+- **Claude Code, from inside** — [`plugins/claude-code/`](plugins/claude-code)
   is a real Claude Code plugin whose `PreToolUse` hook *is* the HCP permission channel, so a
-  phone answers the prompts for the session you are already sitting in. Passes
-  `claude plugin validate`.
+  phone answers the prompts for the session you are already sitting in. This repo is also a
+  Claude Code marketplace, so it installs in two lines:
+
+  ```bash
+  claude plugin marketplace add michaljach/hcp
+  claude plugin install hcp@hcp
+  ```
+
+  See [`plugins/README.md`](plugins/README.md) to get from install to watching a permission
+  cross the wire.
 
 The standard is proven when one mobile client drives both, and no tmux is involved.
 

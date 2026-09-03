@@ -17,7 +17,7 @@ hook entry point and the real sockets.
 
 This repo has two Claude Code implementations, and the difference is architectural.
 
-| | [`claude-code-adapter`](../claude-code-adapter) | this plugin |
+| | [`claude-code-adapter`](../../examples/claude-code-adapter) | this plugin |
 |---|---|---|
 | Relationship to the CLI | **Spawns** `claude` and drives stream-json | **Lives inside** a session you started |
 | Permission channel | `control_request` over stdio | `PreToolUse` hook |
@@ -31,7 +31,7 @@ want to hand off the session already in front of you.
 ## Install
 
 ```bash
-claude plugin install ./examples/claude-code-plugin      # from a checkout
+claude plugin install ./plugins/claude-code               # from a checkout
 ```
 
 Needs Node 22.6+ on `PATH` — the hooks run `.ts` files directly via native type stripping.
