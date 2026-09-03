@@ -4,11 +4,15 @@ Exposes the Claude Code session you are *already sitting in* over HCP v0.1, so a
 a browser, or another harness can watch it and answer its permission prompts.
 
 ```
-claude session ──hooks──▶ HCP daemon ──unix socket──▶ client (phone)
-                             │                              │
-   PreToolUse blocks ────────┘                              │
-   permissionDecision ◀──────────── first answer wins ──────┘
+claude session ──http hooks──▶ MCP server ──unix socket──▶ client (phone)
+                               (this plugin)                     │
+      PreToolUse blocks ───────────┘                             │
+      permissionDecision ◀───────────── first answer wins ───────┘
 ```
+
+The server is the plugin's **bundled MCP server**, so Claude Code starts it when the
+plugin is enabled and stops it with the session. Nothing here spawns or supervises a
+background process.
 
 `claude plugin validate` passes; `npm test` runs 18 end-to-end checks through the real
 hook entry point and the real sockets.
@@ -38,20 +42,41 @@ Needs Node 22.6+ on `PATH` — the hooks run `.ts` files directly via native typ
 
 ## How it works
 
-`hooks/hooks.json` points six events at one dispatcher, `hooks/hook.ts`:
+`hooks/hooks.json` points six events at `http://127.0.0.1:7517/hook`. There is no hook
+script — the hooks are pure configuration, and the server answers them directly:
 
 | Event | What it does |
 |---|---|
-| `SessionStart` | Starts the daemon if it isn't running, registers this session |
+| `SessionStart` | Registers this session with the server |
 | `UserPromptSubmit` | Emits a `user_message` event, state → `working` |
 | `PreToolUse` | **The permission channel.** Classifies, escalates, blocks on the answer |
 | `PostToolUse` | Emits `tool_result` |
 | `Stop` | State → `idle` |
 | `SessionEnd` | State → `ended`, deregisters |
 
-The daemon holds the session state, the `seq`-numbered event log, and the client fan-out.
-It listens on two unix sockets in a `0700` directory, kept separate because they carry
-different trust: `hook.sock` for this plugin's hooks, `hcp.sock` for HCP clients.
+### Why HTTP hooks and not `mcp_tool`
+
+Claude Code offers an `mcp_tool` hook type that would call the bundled server directly,
+and it is the obvious thing to reach for. It does not work here: `mcp_tool` hook results
+are **side-effect only** — read like command-hook stdout, with no support for
+`permissionDecision`. They cannot block a tool call.
+
+`type: "http"` hooks can. They POST the entire hook payload and their response body is
+parsed for the full set of decision fields. So the permission channel is HTTP, and MCP is
+what gets the process started and keeps it alive.
+
+### One process, three surfaces
+
+| Surface | Spoken to by | Carries |
+|---|---|---|
+| stdio | Claude Code | MCP. One tool, `hcp_status` |
+| `127.0.0.1:7517` | this plugin's hooks | Hook events, and the permission decision back |
+| unix socket | HCP clients | HCP v0.1 |
+
+The port is fixed because `hooks.json` is static config and cannot read a value chosen at
+runtime. Every session's hooks POST to the same port, so whichever server owns it serves
+every session on the machine — which is what makes `host/sessions/list` mean anything. A
+server that loses the bind retries, so if the owner exits another takes over.
 
 ### Staying out of the way
 
@@ -64,14 +89,14 @@ exactly as if the plugin were not installed — in three cases:
 3. **The request expired** with no answer after 110s. A client that fell asleep must not
    silently block the agent — it hands back to the local prompt.
 
-Every failure path in `hook.ts` also exits 0 with no decision: daemon down, socket gone,
-malformed JSON, Node too old. A remote-control plugin that can wedge a local session is
-worse than no plugin.
+Every failure path returns `{}` the same way, and if the server is not listening at all
+the hook is a non-blocking error, which Claude Code already treats as "carry on". A
+remote-control plugin that can wedge a local session is worse than no plugin.
 
 ### Timeout chain
 
-Deliberately ordered so the daemon decides rather than the clock: daemon answers at
-**110s**, the hook gives up at **118s**, `hooks.json` kills it at **120s**.
+Deliberately ordered so the server decides rather than the clock: the server answers at
+**110s** and `hooks.json` gives up at **120s**.
 
 ## Try it
 
@@ -94,7 +119,8 @@ that grades `medium` or higher — `npm install`, a `git push`, anything touchin
 Type `reject_feedback Use staging, not dev` and Claude receives the denial *with the
 reason*, which is the difference between blocking an agent and redirecting one.
 
-`/hcp` inside a session prints daemon status and any sessions sitting in `awaiting_input`.
+`/hcp` inside a session calls the `hcp_status` tool and reports what is attached and what
+is waiting.
 
 ## What it cannot do
 
@@ -104,8 +130,8 @@ one real cost of living inside the session instead of driving it, and it is why 
 still exists.
 
 Also not implemented, all of it specified in the spec and none of it here: `ws://` and
-`relay://` transports (unix socket only), pairing and the Noise channel, leases, push,
-`fs/*` and `terminal/*`.
+`relay://` transports (the HTTP port is loopback-only and carries hooks, not HCP), pairing
+and the Noise channel, leases, push, `fs/*` and `terminal/*`.
 
 ## Note
 
@@ -117,3 +143,6 @@ asserts the copies have not drifted rather than letting them quietly diverge.
 fires a `PermissionRequest` event, which would be a better fit — it fires when a prompt
 would actually be shown, rather than on every tool call — but its payload contract is not
 documented, so adopting it would be guesswork.
+
+Port 7517 is hardcoded in `hooks.json`. Set `HCP_HOOK_PORT` to move the server, but you
+must edit `hooks.json` to match; static config cannot read a runtime value.

@@ -1,23 +1,26 @@
 {
   "name": "hcp",
-  "displayName": "HCP — Harness Control Protocol",
-  "version": "0.1.0",
+  "displayName": "HCP \u2014 Harness Control Protocol",
+  "version": "0.2.0",
   "description": "Exposes this Claude Code session over HCP so a phone, browser, or another harness can watch it and answer its permission prompts.",
-  "author": { "name": "Michal Jach" },
+  "author": {
+    "name": "Michal Jach"
+  },
   "repository": "https://github.com/michaljach/hcp",
   "license": "Apache-2.0",
-  "keywords": ["hcp", "remote", "protocol", "permissions", "mobile"],
+  "keywords": [
+    "hcp",
+    "remote",
+    "protocol",
+    "permissions",
+    "mobile"
+  ],
   "userConfig": {
     "escalate_from": {
       "type": "string",
       "title": "Escalate to remote clients from risk level",
       "description": "Which classified risk levels get sent to attached HCP clients: low, medium, or high. Anything below this passes through to Claude Code's normal permission flow.",
       "default": "medium"
-    },
-    "socket_dir": {
-      "type": "directory",
-      "title": "Socket directory",
-      "description": "Where the HCP daemon's unix sockets live. Defaults to the plugin data directory."
     }
   }
 }

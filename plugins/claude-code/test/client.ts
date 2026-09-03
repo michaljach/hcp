@@ -1,5 +1,5 @@
 /**
- * A minimal HCP client. Attaches to every session on the local daemon, prints events,
+ * A minimal HCP client. Attaches to every session on the local HCP server, prints events,
  * and answers permission requests from stdin — the smallest thing that stands in for
  * a phone.
  *

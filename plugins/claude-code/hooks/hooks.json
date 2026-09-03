@@ -1,18 +1,18 @@
 {
-  "description": "HCP bridge. SessionStart registers this session with the HCP daemon; PreToolUse is the permission channel that a remote client answers; the rest emit session events.",
+  "description": "HCP bridge. Every event POSTs to the plugin's MCP server, which Claude Code keeps alive for the session. PreToolUse is the permission channel: `type: \"http\"` hooks can return a permissionDecision, which `type: \"mcp_tool\"` hooks cannot.",
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+      { "hooks": [ { "type": "http", "url": "http://127.0.0.1:7517/hook", "timeout": 5 } ] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+      { "hooks": [ { "type": "http", "url": "http://127.0.0.1:7517/hook", "timeout": 5 } ] }
     ],
     "PreToolUse": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"",
+            "type": "http",
+            "url": "http://127.0.0.1:7517/hook",
             "statusMessage": "Waiting for remote approval…",
             "timeout": 120
           }
@@ -20,13 +20,13 @@
       }
     ],
     "PostToolUse": [
-      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+      { "hooks": [ { "type": "http", "url": "http://127.0.0.1:7517/hook", "timeout": 5 } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+      { "hooks": [ { "type": "http", "url": "http://127.0.0.1:7517/hook", "timeout": 5 } ] }
     ],
     "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook.ts\"", "timeout": 10 } ] }
+      { "hooks": [ { "type": "http", "url": "http://127.0.0.1:7517/hook", "timeout": 5 } ] }
     ]
   }
 }

@@ -5,20 +5,20 @@
 import { connect } from "node:net";
 import { existsSync, unlinkSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { clientSocket, hookSocket, socketDir } from "./paths.ts";
+import { clientSocket, socketDir, HOOK_PORT } from "./paths.ts";
 import { HCP_VERSION } from "./types.ts";
 
 const cmd = process.argv[2] ?? "status";
 
 if (cmd === "stop") {
-  for (const p of [hookSocket(), clientSocket()])
-    if (existsSync(p)) { try { unlinkSync(p); } catch {} }
-  console.log("HCP daemon sockets removed. It exits on its next idle sweep.");
+  console.log("Nothing to stop. Claude Code owns the server's lifetime — disable the");
+  console.log("plugin, or end the session, and it goes away with it.");
   process.exit(0);
 }
 
 if (!existsSync(clientSocket())) {
-  console.log("HCP daemon is not running. It starts on the next SessionStart hook.");
+  console.log("HCP server is not running. It starts with the plugin's MCP server —");
+  console.log("check `/mcp` for a server named `hcp`.");
   console.log(`Socket directory: ${socketDir()}`);
   process.exit(0);
 }
@@ -27,7 +27,7 @@ const sock = connect(clientSocket());
 const send = (o: unknown) => sock.write(JSON.stringify(o) + "\n");
 const seen: any[] = [];
 
-sock.on("error", (e) => { console.log(`Cannot reach the daemon: ${e.message}`); process.exit(0); });
+sock.on("error", (e) => { console.log(`Cannot reach the server: ${e.message}`); process.exit(0); });
 sock.on("connect", () => {
   send({ jsonrpc: "2.0", hcp: HCP_VERSION, id: "1", method: "initialize",
          params: { protocol_versions: [HCP_VERSION],
@@ -42,7 +42,7 @@ createInterface({ input: sock }).on("line", (l) => {
   if (m.id !== "2") return;
 
   const list = m.result?.sessions ?? [];
-  console.log(`\nHCP daemon up — ${clientSocket()}`);
+  console.log(`\nHCP server up — hooks on :${HOOK_PORT}, clients on ${clientSocket()}`);
   console.log(`Protocol ${HCP_VERSION}, ${list.length} session(s)\n`);
   if (!list.length) console.log("  (no sessions registered yet)");
   for (const s of list) {

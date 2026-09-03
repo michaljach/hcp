@@ -1,62 +1,82 @@
 /**
- * End-to-end test of the plugin, exercising the real hook entry point over the real
- * unix sockets. Nothing is stubbed except Claude Code itself, whose hook payloads are
- * synthesized to the documented shape.
+ * End-to-end test of the plugin.
+ *
+ * Exercises all three of the server's surfaces the way their real callers do: the MCP
+ * handshake over stdio as Claude Code speaks it, HTTP POSTs as `type: "http"` hooks
+ * send them, and the HCP unix socket as a client uses it.
  */
 
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { createInterface } from "node:readline";
-import { mkdtempSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..");
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOCKET_DIR = mkdtempSync(join(tmpdir(), "hcp-test-"));
-const ENV = { ...process.env, CLAUDE_PLUGIN_OPTION_SOCKET_DIR: SOCKET_DIR,
-              CLAUDE_PLUGIN_ROOT: ROOT };
+const PORT = 7600 + Math.floor(Math.random() * 300);
 const SESSION = "cc_session_test";
+const HOOK_URL = `http://127.0.0.1:${PORT}/hook`;
 
 let failures = 0;
 const check = (name: string, cond: unknown, detail = "") => {
   if (cond) console.log(`  PASS  ${name}`);
   else { console.log(`  FAIL  ${name}${detail ? "  <-- " + detail : ""}`); failures++; }
 };
-
-/** Run hooks/hook.ts exactly as Claude Code would, and capture its stdout. */
-function fireHook(payload: Record<string, unknown>): Promise<string> {
-  return new Promise((resolve) => {
-    const p = spawn(process.execPath, [join(ROOT, "hooks", "hook.ts")],
-                    { env: ENV, stdio: ["pipe", "pipe", "pipe"] });
-    let out = "";
-    p.stdout.on("data", (d) => (out += d));
-    p.stderr.on("data", () => {});
-    p.on("close", () => resolve(out.trim()));
-    p.stdin.write(JSON.stringify({ session_id: SESSION, cwd: ROOT, ...payload }));
-    p.stdin.end();
-  });
-}
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-console.log("\nHCP plugin end-to-end\n");
-
-// 1 — SessionStart brings the daemon up
-await fireHook({ hook_event_name: "SessionStart" });
-for (let i = 0; i < 40 && !existsSync(join(SOCKET_DIR, "hcp.sock")); i++) await sleep(50);
-check("SessionStart starts the daemon", existsSync(join(SOCKET_DIR, "hcp.sock")));
-
-// 2 — with nobody attached, PreToolUse must be invisible
-const passthrough = await fireHook({
-  hook_event_name: "PreToolUse", tool_name: "Bash",
-  tool_input: { command: "npm run migrate:dev" }, tool_use_id: "t1",
+// The server is launched exactly as .mcp.json launches it: a stdio subprocess.
+const srv = spawn(process.execPath, [join(ROOT, "src", "server.ts")], {
+  env: { ...process.env, CLAUDE_PLUGIN_OPTION_SOCKET_DIR: SOCKET_DIR,
+         HCP_HOOK_PORT: String(PORT) },
+  stdio: ["pipe", "pipe", "pipe"],
 });
-check("no attached client -> no decision, local flow runs", passthrough === "", passthrough);
+const mcpInbox: any[] = [];
+createInterface({ input: srv.stdout }).on("line", (l) => {
+  if (l.trim()) mcpInbox.push(JSON.parse(l));
+});
+srv.stderr.on("data", () => {});
+const mcp = (id: number, method: string, params: unknown = {}) => {
+  srv.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+  return waitUntil(() => mcpInbox.find((m) => m.id === id));
+};
+async function waitUntil<T>(f: () => T | undefined, ms = 4000): Promise<T> {
+  for (let i = 0; i < ms / 25; i++) { const v = f(); if (v) return v; await sleep(25); }
+  throw new Error("timeout");
+}
+const postHook = (payload: Record<string, unknown>) =>
+  fetch(HOOK_URL, { method: "POST", headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ session_id: SESSION, cwd: ROOT, ...payload }) })
+    .then((r) => r.json() as Promise<any>);
 
-// 3 — attach an HCP client
+console.log("\nHCP plugin end-to-end (MCP-hosted)\n");
+
+// 1 — MCP, as Claude Code speaks it
+const init = await mcp(1, "initialize",
+  { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
+check("MCP initialize echoes the client's protocol version",
+      init.result?.protocolVersion === "2025-06-18");
+check("MCP serverInfo names the plugin", init.result?.serverInfo?.name === "hcp");
+srv.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+
+const tools = await mcp(2, "tools/list");
+check("exposes hcp_status to the model",
+      tools.result?.tools?.[0]?.name === "hcp_status");
+
+// 2 — the HTTP hook surface
+await waitUntil(() => existsSync(join(SOCKET_DIR, "hcp.sock")));
+await postHook({ hook_event_name: "SessionStart" });
+check("the unix socket is listening", existsSync(join(SOCKET_DIR, "hcp.sock")));
+
+const passthrough = await postHook({
+  hook_event_name: "PreToolUse", tool_name: "Bash",
+  tool_input: { command: "npm run migrate:dev" }, tool_use_id: "t1" });
+check("no attached client -> no decision, local flow runs",
+      Object.keys(passthrough).length === 0, JSON.stringify(passthrough));
+
+// 3 — an HCP client over the unix socket
 const sock = connect(join(SOCKET_DIR, "hcp.sock"));
 const inbox: any[] = [];
 const waiters: Array<{ m: (x: any) => boolean; r: (x: any) => void }> = [];
@@ -70,8 +90,7 @@ const waitFor = (m: (x: any) => boolean, ms = 5000): Promise<any> => {
   });
 };
 createInterface({ input: sock }).on("line", (l) => {
-  const m = JSON.parse(l);
-  inbox.push(m);
+  const m = JSON.parse(l); inbox.push(m);
   const i = waiters.findIndex((w) => w.m(m));
   if (i >= 0) waiters.splice(i, 1)[0].r(m);
 });
@@ -80,33 +99,28 @@ await new Promise((r) => sock.on("connect", r));
 send({ jsonrpc: "2.0", hcp: "0.1", id: "i", method: "initialize",
        params: { protocol_versions: ["0.1"], client: { name: "t", version: "1", form_factor: "phone" },
                  device_id: "dev_test_phone" } });
-const init = await waitFor((m) => m.id === "i");
-check("initialize succeeds", init.result?.protocol_version === "0.1");
-check("advertises it cannot originate turns", init.result?.capabilities?.steer === false);
+check("HCP initialize succeeds", (await waitFor((m) => m.id === "i")).result?.protocol_version === "0.1");
 
 send({ jsonrpc: "2.0", hcp: "0.1", id: "p", method: "session/prompt",
        params: { session_id: SESSION, text: "hi" } });
-const refused = await waitFor((m) => m.id === "p");
 check("session/prompt is -32005 (a hook cannot inject a turn)",
-      refused.error?.code === -32005, JSON.stringify(refused.error));
+      (await waitFor((m) => m.id === "p")).error?.code === -32005);
 
 send({ jsonrpc: "2.0", hcp: "0.1", id: "l", method: "host/sessions/list" });
-const list = await waitFor((m) => m.id === "l");
 check("the Claude Code session is registered",
-      list.result?.sessions?.[0]?.session_id === SESSION);
+      (await waitFor((m) => m.id === "l")).result?.sessions?.[0]?.session_id === SESSION);
 
 send({ jsonrpc: "2.0", hcp: "0.1", id: "a", method: "session/attach",
        params: { session_id: SESSION, from_seq: 0 } });
 await waitFor((m) => m.id === "a");
-check("attach succeeds", true);
 
-// 4 — low risk must not escalate even with a client attached
-const lowRisk = await fireHook({ hook_event_name: "PreToolUse", tool_name: "Bash",
-                                 tool_input: { command: "git status" }, tool_use_id: "t2" });
-check("low risk stays below the escalation floor", lowRisk === "", lowRisk);
+// 4 — the escalation floor
+const low = await postHook({ hook_event_name: "PreToolUse", tool_name: "Bash",
+                             tool_input: { command: "git status" }, tool_use_id: "t2" });
+check("low risk stays below the escalation floor", Object.keys(low).length === 0);
 
-// 5 — high risk escalates, and the phone's answer becomes the hook's decision
-const pending = fireHook({ hook_event_name: "PreToolUse", tool_name: "Bash",
+// 5 — high risk escalates and the phone's answer becomes the HTTP response
+const pending = postHook({ hook_event_name: "PreToolUse", tool_name: "Bash",
                            tool_input: { command: "npm run migrate:dev" }, tool_use_id: "t3" });
 const perm = await waitFor((m) => m.method === "session/request_permission");
 check("high risk reaches the client", perm.params?.action?.risk === "high");
@@ -118,31 +132,33 @@ check("session goes to awaiting_input",
 send({ jsonrpc: "2.0", hcp: "0.1", id: perm.id,
        result: { option_id: "reject_feedback", text: "Use staging, not dev" } });
 
-const hookOut = JSON.parse(await pending);
-check("hook emits a PreToolUse decision",
-      hookOut.hookSpecificOutput?.hookEventName === "PreToolUse");
+const body = await pending;
+check("the hook response carries a PreToolUse decision",
+      body.hookSpecificOutput?.hookEventName === "PreToolUse");
 check("the phone's denial becomes permissionDecision:deny",
-      hookOut.hookSpecificOutput?.permissionDecision === "deny",
-      JSON.stringify(hookOut.hookSpecificOutput));
+      body.hookSpecificOutput?.permissionDecision === "deny",
+      JSON.stringify(body));
 check("the reason reaches Claude",
-      hookOut.hookSpecificOutput?.permissionDecisionReason === "Use staging, not dev",
-      hookOut.hookSpecificOutput?.permissionDecisionReason);
-
-const resolved = await waitFor((m) => m.method === "session/permission_resolved");
+      body.hookSpecificOutput?.permissionDecisionReason === "Use staging, not dev");
 check("resolution attributes the device",
-      resolved.params?.resolved_by?.device_id === "dev_test_phone");
+      (await waitFor((m) => m.method === "session/permission_resolved"))
+        .params?.resolved_by?.device_id === "dev_test_phone");
 
-// 6 — seq stays gapless across hook-driven events
+// 6 — seq, and the status tool reflecting live state
 const seqs = inbox.filter((m) => m.method === "session/update").map((m) => m.params.seq);
 check("seq is gapless", seqs.every((n, i) => i === 0 || n === seqs[i - 1] + 1), seqs.join(","));
 
-// 7 — the shared modules must not drift from the adapter's copies
+const st = await mcp(3, "tools/call", { name: "hcp_status", arguments: {} });
+const text = st.result?.content?.[0]?.text ?? "";
+check("hcp_status reports the attached client", /1 client\(s\) attached/.test(text), text.split("\n")[0]);
+
+// 7 — shared modules must not drift from the adapter's copies
 for (const f of ["classify.ts", "types.ts"]) {
   const a = readFileSync(join(ROOT, "..", "..", "examples", "claude-code-adapter", "src", f), "utf8");
-  const b = readFileSync(join(ROOT, "src", f), "utf8");
-  check(`src/${f} is identical to the adapter's copy`, a === b);
+  check(`src/${f} is identical to the adapter's copy`,
+        a === readFileSync(join(ROOT, "src", f), "utf8"));
 }
 
-sock.destroy();
+sock.destroy(); srv.kill();
 console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
 process.exit(failures === 0 ? 0 : 1);

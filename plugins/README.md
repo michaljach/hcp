@@ -7,6 +7,9 @@ terminal in front of you can watch it and answer its permission prompts.
 |---|---|---|
 | [`claude-code/`](claude-code) | Claude Code | `PreToolUse` hook becomes the HCP permission channel |
 
+The plugin ships as a bundled **MCP server**, so Claude Code starts it with the plugin and
+stops it with the session. Nothing runs in the background that you have to manage.
+
 This directory is also a **Claude Code marketplace** — the manifest is at
 [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json) in the repo root.
 
@@ -16,10 +19,10 @@ This directory is also a **Claude Code marketplace** — the manifest is at
 
 ### Requirements
 
-**Node 22.6 or newer on your `PATH`.** This is the one thing that trips people up. The hooks
-execute `.ts` files directly using Node's native type stripping; on older Node the hook exits
-non-zero, and Claude Code treats that as a non-blocking error — your session keeps working,
-the plugin just silently does nothing.
+**Node 22.6 or newer on your `PATH`.** This is the one thing that trips people up. The MCP
+server is a `.ts` file run directly using Node's native type stripping; on older Node it
+fails to start, the hooks get connection errors, and Claude Code treats those as
+non-blocking — your session keeps working, the plugin just silently does nothing.
 
 ```bash
 node --version    # must be v22.6.0 or higher
@@ -46,12 +49,18 @@ Restart your session, or run `/reload-plugins`.
 ### 2. Confirm it loaded
 
 ```
+/mcp
+```
+
+There should be a server named `hcp`, connected. Then:
+
+```
 /hcp
 ```
 
-You should see the daemon's status and any registered sessions. On a fresh install it will
-say the daemon is not running — that is correct. It starts on the next `SessionStart`, so
-open a new session and try again.
+which reports what is attached and whether anything is waiting on a decision. On a fresh
+install it will say no client is attached — that is correct, and it means the plugin is
+deliberately doing nothing yet.
 
 ### 3. Attach a client
 
@@ -120,26 +129,31 @@ Set `escalate_from` to `low` to route everything, or `high` for destructive oper
 **Nothing reaches the client.** Almost always one of: Node is older than 22.6; no client is
 attached; or the action graded below `escalate_from`. Check in that order.
 
-**`/hcp` says the daemon is not running.** It starts on `SessionStart`. Open a new session.
-If it still does not appear, the daemon writes a log next to its sockets — `/hcp` prints the
-socket directory.
+**`/mcp` does not list `hcp`.** The server failed to start. Run it by hand to see why:
+`node plugins/claude-code/src/server.ts` — a Node version error shows up immediately.
 
 **Prompts still appear in my terminal.** That is the design when nothing is attached, and it
 is also what happens on every failure path. The plugin is built so it cannot wedge a local
 session; a silent fallback to normal behavior is the intended failure mode.
 
-**Approvals feel slow.** The daemon answers at 110s, the hook gives up at 118s, and
-`hooks.json` kills it at 120s — ordered so the daemon decides rather than the clock. If you
-are hitting those, nothing is attached to answer.
+**Port 7517 is in use.** The hooks POST to a fixed port because `hooks.json` is static config
+and cannot read a runtime value. If something else owns it, the server retries the bind every
+30 seconds and takes over when the port frees. To move it you must set `HCP_HOOK_PORT` *and*
+edit the URLs in `hooks.json` to match.
+
+**Approvals feel slow.** The server answers at 110s and `hooks.json` gives up at 120s,
+ordered so the server decides rather than the clock. If you are hitting those, nothing is
+attached to answer.
 
 ---
 
 ## Limits worth knowing before you rely on it
 
-- **Local only.** The daemon listens on unix sockets in a `0700` directory. HCP's `ws://`
-  and `relay://` transports, pairing, and the Noise channel are specified in
-  [`spec/v0.1/`](../spec/v0.1) but not implemented, so there is no safe way to reach this
-  from a real phone over a network yet.
+- **Local only.** Clients connect over a unix socket in a `0700` directory, and the HTTP
+  port is loopback-only and carries hooks rather than HCP. HCP's `ws://` and `relay://`
+  transports, pairing, and the Noise channel are specified in [`spec/v0.1/`](../spec/v0.1)
+  but not implemented, so there is no safe way to reach this from a real phone over a
+  network yet.
 - **It cannot originate turns.** A hook can observe and it can decide, but it cannot inject
   a new turn into a running CLI, so `session/prompt` and `session/steer` return `-32005`.
   The [`claude-code-adapter`](../examples/claude-code-adapter) exists for that case: it
@@ -148,8 +162,8 @@ are hitting those, nothing is attached to answer.
 
 ## Writing another one
 
-`plugins/claude-code` is about 700 lines and most of it is not Claude-specific. The parts
-worth copying are `src/daemon.ts` (sessions, `seq` log, client fan-out) and `src/classify.ts`
+`plugins/claude-code` is about 600 lines and most of it is not Claude-specific. The parts
+worth copying are `src/server.ts` (sessions, `seq` log, client fan-out) and `src/classify.ts`
 (risk grading), both of which are harness-independent — the
 [Codex adapter](../examples/codex-adapter) demonstrates that by reusing the equivalent files
 byte-for-byte. What you actually write per harness is the hook wiring and the payload mapping.
