@@ -1,8 +1,8 @@
 {
   "name": "hcp",
   "displayName": "HCP \u2014 Harness Control Protocol",
-  "version": "0.3.0",
-  "description": "Exposes this Claude Code session over HCP so a phone, browser, or another harness can watch it and answer its permission prompts.",
+  "version": "0.4.0",
+  "description": "Exposes this Claude Code session over HCP, with a mobile web client. Watch the session and answer its permission prompts from your phone.",
   "author": {
     "name": "Michal Jach"
   },
@@ -21,6 +21,12 @@
       "title": "Escalate to remote clients from risk level",
       "description": "Which classified risk levels get sent to attached HCP clients: low, medium, or high. Anything below this passes through to Claude Code's normal permission flow.",
       "default": "medium"
+    },
+    "bind": {
+      "type": "string",
+      "title": "Network binding",
+      "description": "\"loopback\" (default) keeps the server on 127.0.0.1. \"lan\" binds all interfaces so a phone on the same Wi-Fi can reach it \u2014 every request still needs the capability token. Only turn this on for networks you trust.",
+      "default": "loopback"
     }
   }
 }

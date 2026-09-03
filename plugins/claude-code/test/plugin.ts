@@ -198,7 +198,68 @@ const st = await mcp(3, "tools/call", { name: "hcp_status", arguments: {} });
 const text = st.result?.content?.[0]?.text ?? "";
 check("hcp_status reports the attached client", /1 client\(s\) attached/.test(text), text.split("\n")[0]);
 
-// 9 — shared modules must not drift from the adapter's copies
+// 9 — the web surface a phone actually uses
+console.log();
+const TOKEN = readFileSync(join(SOCKET_DIR, "token"), "utf8").trim();
+const base = `http://127.0.0.1:${PORT}`;
+
+check("the page is refused without a token", (await fetch(`${base}/`)).status === 401);
+check("a wrong token is refused", (await fetch(`${base}/?t=nope`)).status === 401);
+const page = await fetch(`${base}/?t=${TOKEN}`);
+check("the page is served with a token", page.status === 200);
+const html = await page.text();
+check("the page is self-contained (no CDN, no external fonts)",
+      !/src="http|href="http/.test(html), "found an external reference");
+
+// SSE + POST, exactly as the browser does it
+const es = await fetch(`${base}/events?t=${TOKEN}`);
+check("SSE stream opens", es.headers.get("content-type")?.startsWith("text/event-stream"));
+const reader = es.body!.getReader();
+const dec = new TextDecoder();
+let buf = "";
+async function nextEvent(): Promise<any> {
+  for (let i = 0; i < 400; i++) {
+    const nl = buf.indexOf("\n\n");
+    if (nl >= 0) {
+      const chunk = buf.slice(0, nl); buf = buf.slice(nl + 2);
+      const line = chunk.split("\n").find((x) => x.startsWith("data: "));
+      if (line) return JSON.parse(line.slice(6));
+      continue;
+    }
+    const { value, done } = await reader.read();
+    if (done) throw new Error("stream ended");
+    buf += dec.decode(value, { stream: true });
+  }
+  throw new Error("no event");
+}
+const hello = await nextEvent();
+check("the stream opens with a client id", hello.method === "hello" && !!hello.params.client_id);
+const WC = hello.params.client_id;
+
+const post = (body: unknown) =>
+  fetch(`${base}/rpc?t=${TOKEN}&c=${WC}`, { method: "POST",
+    headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+const winit = await (await post({ jsonrpc: "2.0", hcp: "0.1", id: "w1",
+  method: "initialize", params: { protocol_versions: ["0.1"],
+    client: { name: "web", version: "1", form_factor: "phone" }, device_id: "web_test" } })).json();
+check("the web client can initialize over /rpc", winit.result?.protocol_version === "0.1");
+
+const wlist = await (await post({ jsonrpc: "2.0", hcp: "0.1", id: "w2",
+  method: "host/sessions/list" })).json();
+check("it sees the same sessions as a socket client",
+      (wlist.result?.sessions ?? []).some((x: any) => x.session_id === SESSION));
+
+check("an unknown client id is rejected",
+      (await fetch(`${base}/rpc?t=${TOKEN}&c=cl_nope`, { method: "POST",
+        headers: { "content-type": "application/json" }, body: "{}" })).status === 409);
+
+check("/hook needs no token but must be a POST",
+      (await fetch(`${base}/hook?t=`)).status === 403);
+
+reader.cancel().catch(() => {});
+
+// 10 — shared modules must not drift from the adapter's copies
 for (const f of ["classify.ts", "types.ts"]) {
   const a = readFileSync(join(ROOT, "..", "..", "examples", "claude-code-adapter", "src", f), "utf8");
   check(`src/${f} is identical to the adapter's copy`,

@@ -6,6 +6,7 @@ import { connect } from "node:net";
 import { existsSync, unlinkSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { clientSocket, socketDir, HOOK_PORT } from "./paths.ts";
+import { capabilityToken, lanAddress } from "./token.ts";
 import { HCP_VERSION } from "./types.ts";
 
 const cmd = process.argv[2] ?? "status";
@@ -51,7 +52,11 @@ createInterface({ input: sock }).on("line", (l) => {
                 `  ${s.name}${flag}`);
     for (const p of s.pending_permissions ?? []) console.log(`      pending: ${p}`);
   }
-  console.log("\nAttach a client:  node plugins/claude-code/test/client.ts\n");
+  const lan = lanAddress();
+  console.log("\nOn your phone, same Wi-Fi:");
+  console.log(`  http://${lan ?? "127.0.0.1"}:${HOOK_PORT}/#t=${capabilityToken()}`);
+  console.log("  (requires the plugin's `bind` option set to \"lan\")");
+  console.log("\nIn a terminal:  node plugins/claude-code/test/client.ts\n");
   sock.destroy();
   process.exit(0);
 });

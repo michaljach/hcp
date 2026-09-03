@@ -31,6 +31,8 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { clientSocket, HOOK_PORT } from "./paths.ts";
+import { capabilityToken, tokenMatches, lanAddress } from "./token.ts";
+import { PAGE } from "./webapp.ts";
 
 /** Read from the manifest rather than hardcoded, which had already drifted once. */
 const VERSION = (() => {
@@ -43,6 +45,16 @@ const VERSION = (() => {
 const MAX_EVENTS = 10_000;
 /** Answers before the hook's own 120s ceiling in hooks.json, so we decide, not the clock. */
 const PERMISSION_TTL_MS = 110_000;
+
+const TOKEN = capabilityToken();
+/**
+ * Loopback unless explicitly opted in. Binding a control channel for a developer's
+ * workstation to every interface is not something to do by default, however
+ * convenient — spec/v0.1/transport.md forbids a non-loopback bind without auth, and
+ * the token below is that auth.
+ */
+const BIND_LAN = (process.env.CLAUDE_PLUGIN_OPTION_BIND ?? "loopback") === "lan";
+const BIND_HOST = BIND_LAN ? "0.0.0.0" : "127.0.0.1";
 
 const RISK_ORDER = { low: 0, medium: 1, high: 2 } as const;
 const escalateFrom =
@@ -66,6 +78,7 @@ interface Session { id: string; cwd: string; name: string; state: SessionState;
 
 const sessions = new Map<string, Session>();
 const clients = new Set<Client>();
+const webClients = new Map<string, Client>();
 
 function session(id: string, cwd = process.cwd()): Session {
   let s = sessions.get(id);
@@ -301,20 +314,90 @@ function answerPermission(requestId: string, optionId: string, text: string | un
 
 // -------------------------------------------------------------------- listeners
 
-const http = createHttp((req, res) => {
-  if (req.method !== "POST") { res.writeHead(405).end(); return; }
-  let body = "";
-  req.on("data", (d) => (body += d));
-  req.on("end", async () => {
+const isLoopback = (req: any) =>
+  ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket?.remoteAddress ?? "");
+
+const readBody = (req: any) => new Promise<string>((resolve) => {
+  let b = ""; req.on("data", (d: any) => (b += d)); req.on("end", () => resolve(b));
+});
+
+const http = createHttp(async (req, res) => {
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const authed = tokenMatches(url.searchParams.get("t"), TOKEN);
+
+  // Hooks are local by definition and carry no token; anything off-box must not
+  // be able to forge them.
+  if (url.pathname === "/hook") {
+    if (req.method !== "POST" || !isLoopback(req)) { res.writeHead(403).end(); return; }
     let reply: unknown = {};
-    try { reply = await onHook(JSON.parse(body)); } catch { reply = {}; }
+    try { reply = await onHook(JSON.parse(await readBody(req))); } catch { reply = {}; }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(reply));
-  });
+    return;
+  }
+
+  if (!authed) {
+    res.writeHead(401, { "content-type": "text/plain" });
+    res.end("HCP: a capability token is required. Run /hcp in Claude Code for the link.\n");
+    return;
+  }
+
+  if (url.pathname === "/" && req.method === "GET") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8",
+                         "cache-control": "no-store" });
+    res.end(PAGE);
+    return;
+  }
+
+  // Server -> client. SSE rather than a WebSocket: RFC 6455 framing by hand is the
+  // only alternative that keeps this dependency-free, and a phone browser speaks
+  // this natively.
+  if (url.pathname === "/events" && req.method === "GET") {
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store",
+                         connection: "keep-alive", "x-accel-buffering": "no" });
+    const id = `cl_${randomUUID().slice(0, 6)}`;
+    const c: Client = {
+      id,
+      send: (m) => { try { res.write(`data: ${JSON.stringify(m)}\n\n`); } catch {} },
+      attached: new Set(),
+    };
+    clients.add(c); webClients.set(id, c);
+    c.send({ jsonrpc: "2.0", hcp: HCP_VERSION, method: "hello",
+             params: { client_id: id, device_id: `web_${id}` } });
+    const beat = setInterval(() => { try { res.write(": ping\n\n"); } catch {} }, 25_000);
+    const drop = () => { clearInterval(beat); clients.delete(c); webClients.delete(id); };
+    req.on("close", drop); req.on("error", drop);
+    return;
+  }
+
+  // Client -> server, carrying the same JSON-RPC messages the socket transport uses.
+  if (url.pathname === "/rpc" && req.method === "POST") {
+    const c = webClients.get(url.searchParams.get("c") ?? "");
+    if (!c) { res.writeHead(409).end('{"error":"unknown client; reconnect /events"}'); return; }
+    let m: any;
+    try { m = JSON.parse(await readBody(req)); } catch { res.writeHead(400).end(); return; }
+
+    if (m.id !== undefined && m.method === undefined) {
+      if (m.result?.option_id) answerPermission(String(m.id), m.result.option_id, m.result.text, c);
+      res.writeHead(204).end();
+      return;
+    }
+    let out: unknown;
+    try {
+      out = { jsonrpc: "2.0", hcp: HCP_VERSION, id: m.id, result: await onClient(m.method, m.params ?? {}, c) };
+    } catch (e: any) {
+      out = { jsonrpc: "2.0", hcp: HCP_VERSION, id: m.id,
+              error: { code: e?.__rpc ? e.code : ERR.internal, message: e?.message ?? String(e) } };
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(out));
+    return;
+  }
+
+  res.writeHead(404).end();
 });
-// Loopback only. spec/v0.1/transport.md forbids a non-loopback bind without auth.
-http.on("error", () => {});
-const bind = () => http.listen(HOOK_PORT, "127.0.0.1");
+
+const bind = () => http.listen(HOOK_PORT, BIND_HOST);
 http.on("error", (e: any) => {
   // EADDRINUSE means another instance is hosting. Retry so that if it exits, we take over.
   if (e?.code === "EADDRINUSE") setTimeout(bind, 30_000).unref();
@@ -360,10 +443,21 @@ const TOOLS = [{
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
 }];
 
+export function webUrl(): string {
+  const host = BIND_LAN ? (lanAddress() ?? "127.0.0.1") : "127.0.0.1";
+  return `http://${host}:${HOOK_PORT}/#t=${TOKEN}`;
+}
+
 function status(): string {
   const lines = [
     `HCP ${HCP_VERSION} — ${clients.size} client(s) attached, ${sessions.size} session(s)`,
-    `escalate_from=${escalateFrom}  hooks=http://127.0.0.1:${HOOK_PORT}  clients=${clientSocket()}`,
+    `escalate_from=${escalateFrom}  bind=${BIND_LAN ? "lan" : "loopback"}`,
+    ``,
+    BIND_LAN
+      ? `Open on a phone on the same Wi-Fi:\n  ${webUrl()}`
+      : `Bound to loopback, so a phone cannot reach it. Set the plugin's \`bind\`` +
+        ` option to "lan" (/plugin config hcp) and restart, then open:\n  ${webUrl()}`,
+    ``,
   ];
   for (const s of sessions.values()) {
     lines.push(`  ${s.id}  ${s.state.padEnd(15)} seq ${s.seq}  ${s.name}`);

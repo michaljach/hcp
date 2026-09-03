@@ -64,6 +64,14 @@ deliberately doing nothing yet.
 
 ### 3. Attach a client
 
+**On your phone (same Wi-Fi):** set the plugin's `bind` option to `lan` with
+`/plugin config hcp`, restart the session, then run `/hcp` and open the URL it prints —
+including the `#t=` fragment, which is the capability token. You get a live feed,
+permission buttons, and a prompt box. Nothing is exposed until you opt in to `lan`, and
+every request needs the token.
+
+**In a terminal:**
+
 The repo ships a minimal one that stands in for a phone:
 
 ```bash
@@ -167,11 +175,12 @@ attached to answer.
 
 ## Limits worth knowing before you rely on it
 
-- **Local only.** Clients connect over a unix socket in a `0700` directory, and the HTTP
-  port is loopback-only and carries hooks rather than HCP. HCP's `ws://` and `relay://`
-  transports, pairing, and the Noise channel are specified in [`spec/v0.1/`](../spec/v0.1)
-  but not implemented, so there is no safe way to reach this from a real phone over a
-  network yet.
+- **Same network only.** The phone client works over your LAN, guarded by a capability
+  token, over plain HTTP with no TLS. There is no NAT traversal, so nothing works over
+  cellular — that is HCP's `relay://` transport, specified in
+  [`spec/v0.1/`](../spec/v0.1) but unbuilt, and it needs a rendezvous server someone has
+  to host. The Ed25519 device pairing the spec asks for is also not implemented; a bearer
+  token stands in for it.
 - **Prompts land at turn end, not immediately.** `session/prompt` queues your text and
   delivers it by blocking the next `Stop` event. That steers work already in flight, but it
   **cannot wake an idle session** — with no turn running, no `Stop` is coming. For prompts

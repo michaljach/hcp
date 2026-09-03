@@ -98,7 +98,54 @@ remote-control plugin that can wedge a local session is worse than no plugin.
 Deliberately ordered so the server decides rather than the clock: the server answers at
 **110s** and `hooks.json` gives up at **120s**.
 
-## Try it
+## On your phone
+
+The plugin serves a self-contained mobile client. Same Wi-Fi, no app store, no build.
+
+```bash
+/plugin config hcp     # set bind = "lan", then restart the session
+/hcp                   # prints the URL, token included
+```
+
+Open it on your phone:
+
+```
+http://192.168.1.42:7517/#t=<capability-token>
+```
+
+The `#t=` fragment is the token; the page stores it and strips it from the address bar.
+You get the live event feed, a permission card with real buttons, and a box to queue a
+prompt. It vibrates when a decision is waiting.
+
+### What guards it
+
+Every route except `/hook` requires the capability token, compared in constant time.
+`/hook` carries no token — it is how the hooks talk to the server — so it is refused for
+any non-loopback peer, which stops anything off-box forging hook events.
+
+`bind` defaults to `loopback`, so **nothing is exposed until you opt in**. Turning on
+`lan` puts a control channel for your workstation on every interface, guarded by one
+bearer token. That is fine on a home network and wrong on café Wi-Fi.
+
+The token lives in the `0700` socket directory and survives restarts, so a page already
+open on a phone keeps working.
+
+### Honest gaps
+
+- **Same network only.** No NAT traversal, so this does not work over cellular. That is
+  what HCP's `relay://` transport is for, and it is specified but unbuilt.
+- **Plain HTTP.** No TLS, so anyone on that network who has the token can drive your
+  session, and the token crosses the wire in the clear on first load.
+- **A bearer token, not a device keypair.** `spec/v0.1/pairing-and-relay.md` asks for
+  Ed25519 device identities, which a phone browser cannot hold without a real pairing
+  flow. Codex uses capability tokens for the same job, so this is defensible — but it is
+  weaker than what the spec asks for.
+- **SSE, not WebSocket.** HCP v0.1 specifies `ws://`. A WebSocket server would mean
+  hand-rolling RFC 6455 framing to keep the plugin dependency-free, so the browser
+  transport is SSE down and POST up. Same messages, different pipe; the spec should
+  probably name it.
+
+## Try it from a terminal
 
 In one terminal, start a Claude Code session with the plugin enabled. In another:
 
