@@ -13,30 +13,10 @@
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
+import type { PermissionOption } from "./types.ts";
+import type { Harness, HarnessCapabilities, HarnessEvent, PermissionAsk } from "./shared.ts";
 
-export interface HarnessEvent {
-  kind: string;
-  [k: string]: unknown;
-}
-
-export interface PermissionAsk {
-  harnessRequestId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
-export interface Harness {
-  readonly name: string;
-  readonly version: string;
-  start(): Promise<void>;
-  prompt(text: string): void;
-  interrupt(): void;
-  answerPermission(id: string, allow: boolean, message?: string): void;
-  stop(): void;
-  onEvent(cb: (e: HarnessEvent) => void): void;
-  onPermission(cb: (p: PermissionAsk) => void): void;
-  onTurnEnd(cb: () => void): void;
-}
+export type { Harness, HarnessCapabilities, HarnessEvent, PermissionAsk } from "./shared.ts";
 
 abstract class BaseHarness implements Harness {
   abstract readonly name: string;
@@ -50,7 +30,9 @@ abstract class BaseHarness implements Harness {
   abstract start(): Promise<void>;
   abstract prompt(text: string): void;
   abstract interrupt(): void;
-  abstract answerPermission(id: string, allow: boolean, message?: string): void;
+  abstract permissionOptions(): PermissionOption[];
+  abstract capabilities(): HarnessCapabilities;
+  abstract answerPermission(id: string, optionId: string, message?: string): void;
   abstract stop(): void;
 }
 
@@ -147,7 +129,34 @@ export class ClaudeCodeHarness extends BaseHarness {
                  request: { subtype: "interrupt" } });
   }
 
-  answerPermission(id: string, allow: boolean, message?: string): void {
+
+  capabilities(): HarnessCapabilities {
+    return {
+      // Claude Code cannot course-correct mid-turn, so no `steer` method exists
+      // on this driver and the capability is advertised false.
+      steer: false, interrupt: true, replay: true, snapshot: true,
+      lease: false, fork: false, rollback: false, diff: true,
+      terminal: false, push: false,
+      permission_kinds: ["exec", "write", "tool", "network"],
+      permission_scopes: ["once", "session"],
+      fs: { read: true, write: false, watch: false },
+    };
+  }
+
+  permissionOptions(): PermissionOption[] {
+    // Claude Code's control_response carries allow or deny and nothing else, so the
+    // adapter must not advertise a decision it cannot deliver.
+    return [
+      { id: "allow_once", label: "Allow", kind: "allow", scope: "once" },
+      { id: "allow_session", label: "Allow for this session", kind: "allow", scope: "session" },
+      { id: "reject_once", label: "Deny", kind: "reject", scope: "once" },
+      { id: "reject_feedback", label: "Deny and explain", kind: "reject", scope: "once",
+        accepts_text: true },
+    ];
+  }
+
+  answerPermission(id: string, optionId: string, message?: string): void {
+    const allow = optionId.startsWith("allow");
     this.write({
       type: "control_response",
       response: {
@@ -183,7 +192,32 @@ export class MockHarness extends BaseHarness {
 
   interrupt(): void { this.endCb(); }
 
-  answerPermission(_id: string, allow: boolean, message?: string): void {
+
+  capabilities(): HarnessCapabilities {
+    return {
+      // Claude Code cannot course-correct mid-turn, so no `steer` method exists
+      // on this driver and the capability is advertised false.
+      steer: false, interrupt: true, replay: true, snapshot: true,
+      lease: false, fork: false, rollback: false, diff: true,
+      terminal: false, push: false,
+      permission_kinds: ["exec", "write", "tool", "network"],
+      permission_scopes: ["once", "session"],
+      fs: { read: true, write: false, watch: false },
+    };
+  }
+
+  permissionOptions(): PermissionOption[] {
+    return [
+      { id: "allow_once", label: "Allow", kind: "allow", scope: "once" },
+      { id: "allow_session", label: "Allow for this session", kind: "allow", scope: "session" },
+      { id: "reject_once", label: "Deny", kind: "reject", scope: "once" },
+      { id: "reject_feedback", label: "Deny and explain", kind: "reject", scope: "once",
+        accepts_text: true },
+    ];
+  }
+
+  answerPermission(_id: string, optionId: string, message?: string): void {
+    const allow = optionId.startsWith("allow");
     this.pending = null;
     this.evCb(allow
       ? { kind: "agent_message_delta", text: "Migration applied." }

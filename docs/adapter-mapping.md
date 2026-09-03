@@ -7,6 +7,9 @@ Versions surveyed: Claude Code `2.1.258`, codex-cli `0.150.1`.
 
 ## 1. Codex
 
+> Implemented: [`examples/codex-adapter/`](../examples/codex-adapter) — covers everything in
+> this section except the `ws://` transport, which is a change to one method.
+
 Codex is the easy one. `codex app-server` is already JSON-RPC 2.0 with pluggable transports
 and a generated schema; the adapter is largely renaming plus the parts HCP adds.
 
@@ -126,15 +129,31 @@ makes the request answerable on a phone.
 
 ## 3. What the adapters share
 
-Roughly everything that is not vendor-specific, and it should live in a shared library
-rather than being written twice:
+This was a prediction when the spec was written. Both adapters are now built, and it held
+better than expected — the shared portion is **byte-identical**, asserted on every test run:
 
-- The event log, `seq` assignment, retention, and replay
-- Session state machine, including deriving `awaiting_input`
-- Multi-client fan-out, first-answer-wins resolution, lease bookkeeping
-- Device roster, pairing, challenge-response auth
-- Rendezvous dialing and the Noise channel
-- Push registration and trigger evaluation
+| File | Contents | Shared? |
+|---|---|---|
+| `host.ts` | Sessions, `seq` log, retention, replay, fan-out, permission broadcast | identical |
+| `shared.ts` | The Host↔Harness contract | identical |
+| `classify.ts` | Risk grading and summary generation | identical |
+| `types.ts` | HCP wire types | identical |
+| `harness.ts` | Transport to the harness, payload mapping, decision mapping | **per-harness** |
 
-Only three things are genuinely per-harness: the transport to the harness, the permission
-classifier that produces `summary` and `risk`, and the event kind mapping.
+So the revision to the original claim: it is not three things that are per-harness, it is
+**one file**. Two design choices bought that.
+
+**Risk grading is universal.** A force-push is dangerous regardless of which harness
+proposed it. Codex delivers approvals already structured where Claude Code sends an opaque
+tool blob, so rather than fork the classifier, the Codex driver normalizes its typed params
+into the shape the classifier already grades. Only payload mapping is per-harness.
+
+**Capabilities and permission options come from the harness, not the host.** Codex advertises
+`steer`, `fork`, `rollback` and `terminal`; Claude Code advertises none of them. Codex offers
+`reject_cancel` (deny and interrupt the turn) and must *not* offer `reject_feedback`, because
+its `decline` decision carries no message field — a client would render a text box whose
+contents went nowhere. Claude Code is the mirror image. Had either been hardcoded in
+`host.ts`, the file could not be shared.
+
+Still unbuilt in both, and specified: `ws://` and `relay://` transports, device roster and
+pairing, the Noise channel, leases, and push.

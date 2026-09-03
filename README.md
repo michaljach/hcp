@@ -91,14 +91,18 @@ Everything else is shared.
 | [`schema/hcp-v0.1.schema.json`](schema/hcp-v0.1.schema.json) | JSON Schema for the load-bearing message types |
 | [`docs/adapter-mapping.md`](docs/adapter-mapping.md) | Concrete mapping to Claude Code and Codex |
 | [`examples/claude-code-adapter/`](examples/claude-code-adapter) | Reference Host that **drives** the Claude Code CLI |
+| [`examples/codex-adapter/`](examples/codex-adapter) | Reference Host for the **Codex app-server** |
 | [`examples/claude-code-plugin/`](examples/claude-code-plugin) | Claude Code **plugin** that exposes the session you are already in |
 
 ## Conformance targets
 
 Both are reachable today without vendor cooperation, which is the point.
 
-- **Codex** — `codex app-server --listen ws://` already has the right shape. The adapter is
-  mostly renaming.
+- **Codex** — `codex app-server --listen ws://` already has the right shape, so the adapter
+  is mostly renaming. **Implemented** in [`examples/codex-adapter/`](examples/codex-adapter),
+  which reuses the Claude Code adapter's `host.ts` byte-for-byte — the smoke test asserts
+  that identity, so the harness-independence claim is checked on every run rather than
+  merely asserted.
 - **Claude Code** — wrap `claude --input-format stream-json --output-format stream-json
   --permission-prompt-tool stdio`. **Implemented** in
   [`examples/claude-code-adapter/`](examples/claude-code-adapter): a zero-dependency

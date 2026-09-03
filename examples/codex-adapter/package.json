@@ -1,0 +1,14 @@
+{
+  "name": "hcp-codex",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reference HCP v0.1 adapter for the Codex app-server. Zero dependencies, no build step.",
+  "type": "module",
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "start": "node src/main.ts --harness codex",
+    "mock": "node src/main.ts --harness mock",
+    "test": "node test/smoke.ts"
+  },
+  "license": "Apache-2.0"
+}
