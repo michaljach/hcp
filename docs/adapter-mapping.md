@@ -70,6 +70,10 @@ codex app-server --listen ws://127.0.0.1:7699 \
 
 ## 2. Claude Code
 
+> Implemented: [`examples/claude-code-adapter/`](../examples/claude-code-adapter) — a
+> working, zero-dependency Host covering everything in this section except the `ws://` and
+> `relay://` transports.
+
 Harder, because there is no public remote wire format. The adapter drives the documented
 stdio control protocol and provides everything above it.
 

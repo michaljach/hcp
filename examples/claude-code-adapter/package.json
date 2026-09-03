@@ -1,0 +1,16 @@
+{
+  "name": "hcp-claude-code",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reference HCP v0.1 adapter for the Claude Code CLI. Zero dependencies, no build step.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "start": "node src/main.ts --harness claude",
+    "mock": "node src/main.ts --harness mock",
+    "test": "node test/classify.ts && node test/smoke.ts"
+  },
+  "license": "Apache-2.0"
+}

@@ -90,6 +90,7 @@ Everything else is shared.
 | [`spec/v0.1/capabilities.md`](spec/v0.1/capabilities.md) | Negotiation and graceful degradation |
 | [`schema/hcp-v0.1.schema.json`](schema/hcp-v0.1.schema.json) | JSON Schema for the load-bearing message types |
 | [`docs/adapter-mapping.md`](docs/adapter-mapping.md) | Concrete mapping to Claude Code and Codex |
+| [`examples/claude-code-adapter/`](examples/claude-code-adapter) | Working reference Host for the Claude Code CLI |
 
 ## Conformance targets
 
@@ -98,7 +99,10 @@ Both are reachable today without vendor cooperation, which is the point.
 - **Codex** — `codex app-server --listen ws://` already has the right shape. The adapter is
   mostly renaming.
 - **Claude Code** — wrap `claude --input-format stream-json --output-format stream-json
-  --permission-prompt-tool stdio`.
+  --permission-prompt-tool stdio`. **Implemented** in
+  [`examples/claude-code-adapter/`](examples/claude-code-adapter): a zero-dependency
+  TypeScript Host with a scripted harness mode, so `npm test` runs the whole loop without
+  tokens or a logged-in CLI.
 
 The standard is proven when one mobile client drives both, and no tmux is involved.
 
