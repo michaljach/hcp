@@ -27,7 +27,18 @@ import { unlinkSync, existsSync } from "node:fs";
 import { classify } from "./classify.ts";
 import { HCP_VERSION, ERR } from "./types.ts";
 import type { PermissionOption, SessionState, SessionEvent } from "./types.ts";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { clientSocket, HOOK_PORT } from "./paths.ts";
+
+/** Read from the manifest rather than hardcoded, which had already drifted once. */
+const VERSION = (() => {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(readFileSync(join(here, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
+  } catch { return "0.0.0"; }
+})();
 
 const MAX_EVENTS = 10_000;
 /** Answers before the hook's own 120s ceiling in hooks.json, so we decide, not the clock. */
@@ -60,9 +71,24 @@ function session(id: string, cwd = process.cwd()): Session {
     s = { id, cwd, name: cwd.split("/").pop() ?? "session", state: "idle",
           seq: 0, oldestSeq: 1, log: [], pending: new Map() };
     sessions.set(id, s);
+    // Clients attach to a session list they fetched once. Without this, a client
+    // that connected before any session existed would sit silent forever.
+    announce();
   }
   return s;
 }
+
+/** `host/status` — spec/v0.1 method index. Goes to every client, attached or not. */
+function announce() {
+  const params = { sessions: [...sessions.values()].map(summarize) };
+  for (const c of clients)
+    c.send({ jsonrpc: "2.0", hcp: HCP_VERSION, method: "host/status", params });
+}
+
+const summarize = (s: Session) => ({
+  session_id: s.id, name: s.name, cwd: s.cwd, state: s.state,
+  seq: s.seq, oldest_seq: s.oldestSeq, pending_permissions: [...s.pending.keys()],
+});
 
 function emit(s: Session, update: Record<string, unknown>): number {
   const ev: SessionEvent = { session_id: s.id, seq: ++s.seq, update: update as any };
@@ -102,7 +128,7 @@ async function onHook(m: any): Promise<unknown> {
       emit(s, { kind: "tool_result", tool: m.tool_name, output: m.tool_response ?? null });
       return {};
     case "Stop": setState(s, "idle"); return {};
-    case "SessionEnd": setState(s, "ended"); sessions.delete(s.id); return {};
+    case "SessionEnd": setState(s, "ended"); sessions.delete(s.id); announce(); return {};
     case "PreToolUse": return await onPreToolUse(s, m);
     default: return {};
   }
@@ -170,8 +196,8 @@ async function onClient(method: string, params: any, c: Client): Promise<unknown
       c.deviceId = params?.device_id;
       return {
         protocol_version: HCP_VERSION,
-        host: { name: "hcp-plugin", version: "0.2.0", platform: process.platform },
-        harness: { name: "claude-code", version: "unknown", adapter: "hcp-plugin/0.2.0" },
+        host: { name: "hcp-plugin", version: VERSION, platform: process.platform },
+        harness: { name: "claude-code", version: "unknown", adapter: `hcp-plugin/${VERSION}` },
         capabilities: {
           steer: false, interrupt: false, replay: true, snapshot: true, lease: false,
           fork: false, rollback: false, diff: false, terminal: false, push: false,
@@ -182,9 +208,7 @@ async function onClient(method: string, params: any, c: Client): Promise<unknown
       };
     }
     case "host/sessions/list":
-      return { sessions: [...sessions.values()].map((s) => ({
-        session_id: s.id, name: s.name, cwd: s.cwd, state: s.state,
-        seq: s.seq, oldest_seq: s.oldestSeq, pending_permissions: [...s.pending.keys()] })) };
+      return { sessions: [...sessions.values()].map(summarize) };
     case "session/attach": {
       const s = sessions.get(String(params?.session_id));
       if (!s) fail(ERR.sessionNotFound, "no such session");
@@ -318,7 +342,7 @@ createInterface({ input: process.stdin }).on("line", (l) => {
       return reply({
         protocolVersion: m.params?.protocolVersion ?? "2025-06-18",
         capabilities: { tools: {} },
-        serverInfo: { name: "hcp", version: "0.2.0" },
+        serverInfo: { name: "hcp", version: VERSION },
       });
     case "notifications/initialized": return;
     case "ping": return reply({});

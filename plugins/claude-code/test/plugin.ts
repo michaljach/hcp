@@ -143,7 +143,16 @@ check("resolution attributes the device",
       (await waitFor((m) => m.method === "session/permission_resolved"))
         .params?.resolved_by?.device_id === "dev_test_phone");
 
-// 6 — seq, and the status tool reflecting live state
+// 6 — a session that registers AFTER a client connected must announce itself.
+// Without this the client sits silent forever, which is exactly what happened in
+// the field: it lists sessions once at connect and never learns about later ones.
+await postHook({ session_id: "cc_session_later", hook_event_name: "SessionStart" });
+const announced = await waitFor((m) => m.method === "host/status" &&
+  (m.params?.sessions ?? []).some((x: any) => x.session_id === "cc_session_later"));
+check("a later session is announced over host/status",
+      !!announced, JSON.stringify(announced?.params));
+
+// 7 — seq, and the status tool reflecting live state
 const seqs = inbox.filter((m) => m.method === "session/update").map((m) => m.params.seq);
 check("seq is gapless", seqs.every((n, i) => i === 0 || n === seqs[i - 1] + 1), seqs.join(","));
 
@@ -151,7 +160,7 @@ const st = await mcp(3, "tools/call", { name: "hcp_status", arguments: {} });
 const text = st.result?.content?.[0]?.text ?? "";
 check("hcp_status reports the attached client", /1 client\(s\) attached/.test(text), text.split("\n")[0]);
 
-// 7 — shared modules must not drift from the adapter's copies
+// 8 — shared modules must not drift from the adapter's copies
 for (const f of ["classify.ts", "types.ts"]) {
   const a = readFileSync(join(ROOT, "..", "..", "examples", "claude-code-adapter", "src", f), "utf8");
   check(`src/${f} is identical to the adapter's copy`,

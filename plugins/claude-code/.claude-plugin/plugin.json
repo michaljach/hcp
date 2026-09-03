@@ -1,7 +1,7 @@
 {
   "name": "hcp",
   "displayName": "HCP \u2014 Harness Control Protocol",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Exposes this Claude Code session over HCP so a phone, browser, or another harness can watch it and answer its permission prompts.",
   "author": {
     "name": "Michal Jach"

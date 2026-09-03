@@ -14,6 +14,22 @@ import { HCP_VERSION } from "../src/types.ts";
 const sock = connect(clientSocket());
 const send = (o: unknown) => sock.write(JSON.stringify(o) + "\n");
 let pending: string | null = null;
+const attached = new Set<string>();
+
+function attachAll(list: any[]) {
+  if (!list.length && !attached.size) {
+    console.log("Connected. No Claude Code session is registered yet — a session appears");
+    console.log("here on its first hook event, so send a prompt in one and it will show up.");
+    return;
+  }
+  for (const s of list) {
+    if (attached.has(s.session_id)) continue;
+    attached.add(s.session_id);
+    console.log(`attaching to ${s.session_id} (${s.state})`);
+    send({ jsonrpc: "2.0", hcp: HCP_VERSION, id: `att_${s.session_id}`,
+           method: "session/attach", params: { session_id: s.session_id, from_seq: 0 } });
+  }
+}
 
 sock.on("error", (e: any) => {
   console.error(`Cannot reach the HCP server at ${clientSocket()}`);
@@ -36,14 +52,10 @@ sock.on("connect", () => {
 createInterface({ input: sock }).on("line", (l) => {
   const m = JSON.parse(l);
 
-  if (m.id === "list") {
-    for (const s of m.result?.sessions ?? []) {
-      console.log(`attaching to ${s.session_id} (${s.state})`);
-      send({ jsonrpc: "2.0", hcp: HCP_VERSION, id: `att_${s.session_id}`,
-             method: "session/attach", params: { session_id: s.session_id, from_seq: 0 } });
-    }
-    return;
-  }
+  if (m.id === "list") { attachAll(m.result?.sessions ?? []); return; }
+
+  // A session registered after we connected.
+  if (m.method === "host/status") { attachAll(m.params?.sessions ?? []); return; }
 
   if (m.method === "session/update") {
     const u = m.params.update;
