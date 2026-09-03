@@ -4,8 +4,7 @@ An open protocol for **attaching to, steering, and approving work in a running c
 session** — from another process, another machine, or a phone.
 
 > **Status:** draft `v0.1`. Nothing here is stable yet. See [`docs/prior-art.md`](docs/prior-art.md)
-> for the landscape review this design came out of, and [Naming](#naming) for an open question
-> about the acronym.
+> for the landscape review this design came out of.
 
 ## The problem
 
@@ -17,6 +16,48 @@ independently, and neither is usable by anyone else.
 So the shipping third-party mobile clients drive these agents by injecting keystrokes into
 tmux and screen-scraping the terminal. That is the state of the art for cross-harness
 control in 2026.
+
+## Shape
+
+```mermaid
+flowchart LR
+  subgraph CL["Clients — none privileged"]
+    PH["Phone"]
+    WB["Browser"]
+    TM["Terminal"]
+    ED["Editor"]
+  end
+
+  RV{{"Rendezvous<br/>ciphertext + routing only"}}
+
+  subgraph MC["Your machine"]
+    HO["Host<br/>event log · seq · device roster"]
+    AD["Adapter"]
+    HN["Harness<br/>Claude Code · Codex"]
+  end
+
+  PH -->|relay| RV
+  WB -->|relay| RV
+  RV -.->|"wss · host dials outbound"| HO
+  TM -->|"unix://"| HO
+  ED -->|"wss direct"| HO
+  HO --> AD
+  AD -->|"stdio · app-server ws"| HN
+```
+
+Three properties the picture is making:
+
+- **No privileged client.** The terminal on the machine and the phone on the sofa are the
+  same kind of peer. Borrowed from `codex --remote`: once the local UI has a private back
+  door, every remote feature is second-class forever.
+- **The Host dials out.** No inbound port is opened on the developer's machine, which is how
+  Claude Code's outbound-polling design gets through NAT too.
+- **The Rendezvous is optional and blind.** `unix://` and direct `wss` skip it entirely, and
+  where it is used it carries an encrypted channel it cannot read.
+
+Only three things are per-harness — the transport to the harness, the classifier that turns
+a raw approval payload into a one-line summary and a risk grade, and the event-kind mapping.
+Everything else is shared.
 
 ## What HCP is not
 
